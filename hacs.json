@@ -2,6 +2,6 @@
   "name": "TFIAC",
   "homeassistant": "2024.10.0",
   "zip_release": true,
-  "filename": "tfiac.zip",
+  "filename": "pytfiac-0.4.0.zip",
   "manifest": "custom_components/tfiac/manifest.json"
 }
