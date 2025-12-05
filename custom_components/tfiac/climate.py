@@ -1,9 +1,6 @@
 """Climate platform that offers a climate device for the TFIAC protocol."""
 
-from __future__ import annotations
-
-import logging
-from typing import Any
+from datetime import timedelta
 
 from pytfiac import Tfiac
 
@@ -27,7 +24,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 
-SCAN_INTERVAL = 60
+SCAN_INTERVAL = timedelta(seconds=60)
 
 _LOGGER = logging.getLogger(__name__)
 
