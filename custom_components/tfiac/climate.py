@@ -57,11 +57,6 @@ async def async_setup_entry(
 ) -> None:
     """Set up the TFIAC climate device."""
     tfiac_client = Tfiac(config_entry.data[CONF_HOST])
-    try:
-        await tfiac_client.update()
-    except Exception:
-        _LOGGER.error("Unable to connect to %s", config_entry.data[CONF_HOST])
-        return
     async_add_entities([TfiacClimate(tfiac_client)])
 
 
