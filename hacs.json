@@ -2,5 +2,16 @@
   "name": "TFIAC",
   "homeassistant": "2024.10.0",
   "zip_release": false,
-  "manifest": "custom_components/tfiac/manifest.json"
+  "manifest": {
+    "domain": "tfiac",
+    "name": "TFIAC",
+    "codeowners": ["@fredrike"],
+    "config_flow": true,
+    "dependencies": [],
+    "documentation": "https://www.home-assistant.io/integrations/tfiac/",
+    "integration_type": "device",
+    "iot_class": "local_polling",
+    "requirements": ["pytfiac>=0.4"],
+    "version": "0.4.0"
+  }
 }
