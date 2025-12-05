@@ -76,6 +76,7 @@ class TfiacClimate(ClimateEntity):
     def __init__(self, client: Tfiac) -> None:
         """Init class."""
         self._client = client
+        self._attr_unique_id = f"tfiac_{client._host}"
 
     async def async_update(self) -> None:
         """Update status via socket polling."""
@@ -88,7 +89,7 @@ class TfiacClimate(ClimateEntity):
     @property
     def name(self):
         """Return the name of the climate device."""
-        return self._client.name
+        return self._client.name or f"TFIAC {self._client._host}"
 
     @property
     def target_temperature(self):
