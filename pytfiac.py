@@ -4,11 +4,26 @@ import logging
 import socket
 
 import xmltodict
-from tellsticknet.util import sock_recvfrom, sock_sendto
 
-__version__ = "0.2"
+__version__ = "0.4"
 
 _LOGGER = logging.getLogger(__name__)
+
+__all__ = [
+    "Tfiac",
+    "Unavailable",
+    "ON_MODE",
+    "OPERATION_MODE",
+    "TARGET_TEMP",
+    "FAN_MODE",
+    "SWING_MODE",
+    "SET_SWING",
+    "OPERATION_LIST",
+    "FAN_LIST",
+    "SWING_LIST",
+    "MIN_TEMP",
+    "MAX_TEMP",
+]
 
 UDP_PORT = 7777
 MIN_TEMP = 61
@@ -87,22 +102,22 @@ class Tfiac():
         """Send message."""
         _LOGGER.debug("Sending message: %s", message.encode())
 
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            sock.setblocking(0)
-            await sock_sendto(sock, message.encode(), (self._host, UDP_PORT))
-            try:
-                data, _ = await asyncio.wait_for(
-                    sock_recvfrom(sock, 1024), 5)
-                return data
-            except socket.timeout:
-                self._available = False
-                raise Unavailable()
-            else:
-                self._available = True
-            finally:
-                sock.close()
+        loop = asyncio.get_running_loop()
+        transport, protocol = await loop.create_datagram_endpoint(
+            lambda: asyncio.DatagramProtocol(),
+            remote_addr=(self._host, UDP_PORT)
+        )
+        transport.sendto(message.encode())
+        try:
+            data, _ = await asyncio.wait_for(
+                loop.sock_recv(transport.get_extra_info('socket'), 1024), timeout=5
+            )
+            return data
+        except asyncio.TimeoutError:
+            self._available = False
+            raise Unavailable()
+        finally:
+            transport.close()
         return
 
     async def update(self):

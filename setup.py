@@ -23,7 +23,6 @@ setuptools.setup(
         "Topic :: Home Automation",
     ],
     install_requires=[
-        'tellsticknet',
         'xmltodict',
     ],
 )

@@ -1,4 +1,4 @@
-from tfiac import Tfiac, ON_MODE, OPERATION_MODE, TARGET_TEMP, FAN_MODE, SWING_MODE, SET_SWING
+from pytfiac import Tfiac, ON_MODE, OPERATION_MODE, TARGET_TEMP, FAN_MODE, SWING_MODE, SET_SWING
 from time import sleep
 import unittest
 
