@@ -53,6 +53,10 @@ async def async_setup_entry(
 ) -> None:
     """Set up the TFIAC climate device."""
     tfiac_client = Tfiac(config_entry.data[CONF_HOST])
+    try:
+        await tfiac_client.update()
+    except Exception:
+        _LOGGER.warning("Initial update failed for %s, proceeding anyway", config_entry.data[CONF_HOST])
     async_add_entities([TfiacClimate(tfiac_client)])
 
 
@@ -76,7 +80,8 @@ class TfiacClimate(ClimateEntity):
     def __init__(self, client: Tfiac) -> None:
         """Init class."""
         self._client = client
-        self._attr_unique_id = f"tfiac_{client._host}"
+        device_name = client.name or f"tfiac_{client._host.replace('.', '_')}"
+        self._attr_unique_id = device_name
 
     async def async_update(self) -> None:
         """Update status via socket polling."""
