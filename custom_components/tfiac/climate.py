@@ -3,8 +3,6 @@
 import logging
 from typing import Any
 
-from pytfiac import Tfiac
-
 from homeassistant.components.climate import (
     FAN_AUTO,
     FAN_HIGH,
@@ -23,7 +21,7 @@ from homeassistant.const import CONF_HOST, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from pytfiac import Tfiac
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -56,7 +54,10 @@ async def async_setup_entry(
     try:
         await tfiac_client.update()
     except Exception:
-        _LOGGER.warning("Initial update failed for %s, proceeding anyway", config_entry.data[CONF_HOST])
+        _LOGGER.warning(
+            "Initial update failed for %s, proceeding anyway",
+            config_entry.data[CONF_HOST],
+        )
     async_add_entities([TfiacClimate(tfiac_client)])
 
 

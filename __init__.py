@@ -1,7 +1,7 @@
 """Pytfiac, Python3 library for tfiac units."""
 
-import sys
 import logging
+import sys
 
 assert sys.version_info >= (3, 0)
 

@@ -27,6 +27,3 @@ If you prefer manual installation:
 2. Install the pytfiac package: `pip install pytfiac>=0.4`
 3. Restart Home Assistant.
 4. Add the integration as above.
-
-
-

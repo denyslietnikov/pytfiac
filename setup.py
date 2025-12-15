@@ -1,4 +1,5 @@
 """Tfiac API."""
+
 import setuptools
 
 with open("README.md", "r") as fh:
@@ -23,6 +24,6 @@ setuptools.setup(
         "Topic :: Home Automation",
     ],
     install_requires=[
-        'xmltodict',
+        "xmltodict",
     ],
 )
