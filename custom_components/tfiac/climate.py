@@ -83,6 +83,7 @@ class TfiacClimate(ClimateEntity):
         self._client = client
         device_name = client.name or f"tfiac_{client._host.replace('.', '_')}"
         self._attr_unique_id = device_name
+        self._attr_should_poll = True
 
     async def async_update(self) -> None:
         """Update status via socket polling."""
