@@ -23,6 +23,8 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from pytfiac import Tfiac
 
+from .const import DOMAIN
+
 _LOGGER = logging.getLogger(__name__)
 
 HVAC_MAP = {
@@ -50,15 +52,24 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Set up the TFIAC climate device."""
-    tfiac_client = Tfiac(config_entry.data[CONF_HOST])
+    host = config_entry.options.get(CONF_HOST, config_entry.data[CONF_HOST])
+    tfiac_client = Tfiac(host)
     try:
         await tfiac_client.update()
     except Exception:
         _LOGGER.warning(
             "Initial update failed for %s, proceeding anyway",
-            config_entry.data[CONF_HOST],
+            host,
         )
-    async_add_entities([TfiacClimate(tfiac_client)])
+    async_add_entities(
+        [
+            TfiacClimate(
+                tfiac_client,
+                config_entry.entry_id,
+                config_entry.options.get("friendly_name", ""),
+            )
+        ]
+    )
 
 
 class TfiacClimate(ClimateEntity):
@@ -78,11 +89,15 @@ class TfiacClimate(ClimateEntity):
     _attr_hvac_modes = list(HVAC_MAP)
     _attr_swing_modes = [SWING_OFF, SWING_HORIZONTAL, SWING_VERTICAL, SWING_BOTH]
 
-    def __init__(self, client: Tfiac) -> None:
+    def __init__(self, client: Tfiac, entry_id: str, friendly_name: str) -> None:
         """Init class."""
         self._client = client
-        device_name = client.name or f"tfiac_{client._host.replace('.', '_')}"
-        self._attr_unique_id = device_name
+        self._attr_unique_id = entry_id
+        self._friendly_name = friendly_name
+        self._attr_device_info = {
+            "identifiers": {(DOMAIN, entry_id)},
+            "name": friendly_name or client.name or "TFIAC",
+        }
         self._attr_should_poll = True
 
     async def async_update(self) -> None:
@@ -96,7 +111,7 @@ class TfiacClimate(ClimateEntity):
     @property
     def name(self):
         """Return the name of the climate device."""
-        return self._client.name or f"TFIAC {self._client._host}"
+        return self._friendly_name or self._client.name or f"TFIAC {self._client._host}"
 
     @property
     def target_temperature(self):
