@@ -7,7 +7,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="pytfiac",
-    version="0.4",
+    version="0.5",
     author="Fredrik Erlandsson, Pablo Mellado",
     author_email="fredrik.e@gmail.com",
     description="API for Tfiac AC",

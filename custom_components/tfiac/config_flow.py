@@ -11,9 +11,8 @@ from homeassistant.const import CONF_HOST
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.exceptions import HomeAssistantError
 
-from pytfiac import Tfiac
-
 from .const import DOMAIN
+from .pytfiac import Tfiac
 
 _LOGGER = logging.getLogger(__name__)
 

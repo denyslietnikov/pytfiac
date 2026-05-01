@@ -8,6 +8,8 @@ from homeassistant.components.climate import (
     FAN_HIGH,
     FAN_LOW,
     FAN_MEDIUM,
+    PRESET_NONE,
+    PRESET_SLEEP,
     SWING_BOTH,
     SWING_HORIZONTAL,
     SWING_OFF,
@@ -21,9 +23,8 @@ from homeassistant.const import CONF_HOST, UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from pytfiac import Tfiac
-
 from .const import DOMAIN
+from .pytfiac import SLEEP_MODE, SLEEP_MODE_OFF, Tfiac
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -77,6 +78,7 @@ class TfiacClimate(ClimateEntity):
 
     _attr_supported_features = (
         ClimateEntityFeature.FAN_MODE
+        | ClimateEntityFeature.PRESET_MODE
         | ClimateEntityFeature.SWING_MODE
         | ClimateEntityFeature.TARGET_TEMPERATURE
         | ClimateEntityFeature.TURN_OFF
@@ -88,6 +90,7 @@ class TfiacClimate(ClimateEntity):
     _attr_fan_modes = [FAN_AUTO, FAN_HIGH, FAN_MEDIUM, FAN_LOW]
     _attr_hvac_modes = list(HVAC_MAP)
     _attr_swing_modes = [SWING_OFF, SWING_HORIZONTAL, SWING_VERTICAL, SWING_BOTH]
+    _attr_preset_modes = [PRESET_NONE, PRESET_SLEEP]
 
     def __init__(self, client: Tfiac, entry_id: str, friendly_name: str) -> None:
         """Init class."""
@@ -145,6 +148,13 @@ class TfiacClimate(ClimateEntity):
         """Return the swing setting."""
         return self._client.status.get(SWING_MODE, "").lower()
 
+    @property
+    def preset_mode(self) -> str:
+        """Return the current preset mode."""
+        if self._client.status.get(SLEEP_MODE, SLEEP_MODE_OFF) != SLEEP_MODE_OFF:
+            return PRESET_SLEEP
+        return PRESET_NONE
+
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Set new target temperature."""
         if (temp := kwargs.get("temperature")) is not None:
@@ -164,6 +174,10 @@ class TfiacClimate(ClimateEntity):
     async def async_set_swing_mode(self, swing_mode: str) -> None:
         """Set new swing mode."""
         await self._client.set_swing(swing_mode.capitalize())
+
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        """Set new preset mode."""
+        await self._client.set_sleep(preset_mode == PRESET_SLEEP)
 
     async def async_turn_on(self) -> None:
         """Turn device on."""
