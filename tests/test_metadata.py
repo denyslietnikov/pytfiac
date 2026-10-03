@@ -13,16 +13,16 @@ def load_json(path: str) -> dict:
     return json.loads((ROOT / path).read_text(encoding="utf-8"))
 
 
-def test_manifest_is_release_051() -> None:
+def test_manifest_is_development_candidate() -> None:
     """The Home Assistant manifest contains the HACS-required metadata."""
     manifest = load_json("custom_components/tfiac/manifest.json")
 
     assert manifest["domain"] == "tfiac"
-    assert manifest["version"] == "0.5.1"
+    assert manifest["version"] == "0.6.0b1"
     assert manifest["codeowners"] == ["@denyslietnikov"]
     assert manifest["documentation"].startswith("https://github.com/")
     assert manifest["issue_tracker"].endswith("/issues")
-    assert manifest["requirements"] == ["xmltodict==1.0.4"]
+    assert manifest["requirements"] == []
 
 
 def test_hacs_metadata_does_not_duplicate_manifest() -> None:
@@ -31,7 +31,7 @@ def test_hacs_metadata_does_not_duplicate_manifest() -> None:
 
     assert hacs == {
         "name": "TFIAC",
-        "homeassistant": "2024.10.0",
+        "homeassistant": "2026.9.4",
         "hide_default_branch": True,
     }
 

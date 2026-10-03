@@ -1,0 +1,3 @@
+# Stable Home Assistant 2026.9.4; requires Python 3.14.
+-r requirements_test.txt
+pytest-homeassistant-custom-component==0.13.367

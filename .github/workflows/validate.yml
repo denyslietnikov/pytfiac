@@ -6,7 +6,6 @@ on:
     branches:
       - develop
       - master
-      - next
   release:
     types:
       - published

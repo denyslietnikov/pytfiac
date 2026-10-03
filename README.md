@@ -3,6 +3,10 @@
 Custom Home Assistant integration for local control of air conditioners that use
 the TFIAC protocol and mobile app.
 
+The `develop` branch contains the unpublished `0.6.0b1` development candidate.
+Its HA lifecycle and command transactions are covered by automated tests, but
+the new implementation has not yet been tested on real air conditioners.
+
 ## Features
 
 - HVAC modes: Cool, Heat, Dry, Fan Only, and Auto
@@ -14,7 +18,7 @@ the TFIAC protocol and mobile app.
 
 ## Requirements
 
-- Home Assistant 2024.10.0 or newer
+- Home Assistant 2026.9.4 or newer for the `0.6` development candidate
 - The air conditioner and Home Assistant must be able to reach each other on the
   local network over UDP port 7777
 
@@ -44,9 +48,19 @@ The protocol client is bundled inside the integration. Do not install the legacy
 
 ## Usage
 
-The integration creates one climate entity. Sleep mode is available in its
-**Preset** selector as `sleep`; select `none` to disable it. Sleep and Turbo are
-mutually exclusive at the device protocol level.
+The integration creates one climate entity. Sleep mode, when reported by the
+device, is available in its **Preset** selector as `sleep`; select `none` to
+disable it. Sleep and Turbo are
+not changed together by this integration until their interaction is confirmed
+on real devices.
+
+Fan speeds use `auto`, `low`, `middle`, and `high`. Update existing automations
+that request `medium` to use `middle`. Turning the AC on preserves
+its reported operation instead of forcing Cool.
+
+Existing config entries, climate unique IDs, and device identifiers are retained.
+Use **Reconfigure** to update a device host; an old host override in options is
+removed while other options are preserved.
 
 To use the entity from an iPhone, expose it with Home Assistant's standard
 [HomeKit Bridge](https://www.home-assistant.io/integrations/homekit/) integration.
@@ -59,19 +73,8 @@ Home Assistant and verify power, mode, temperature, fan, swing, and Sleep contro
 To roll back, open TFIAC in HACS, select **Redownload**, choose the previous stable
 version, and restart Home Assistant.
 
-## Development
-
-Install the small test toolchain and run the same checks as CI:
-
-```bash
-python -m pip install --requirement requirements_test.txt
-ruff check custom_components tests
-ruff format --check custom_components tests
-pytest
-```
-
-See [ROADMAP.md](ROADMAP.md) for the planned architecture work and
-[docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) for the release process.
+Development plans, local test commands, and release criteria are documented in
+[ROADMAP.md](ROADMAP.md).
 
 ## Support
 

@@ -5,7 +5,8 @@
       "reconfigure_successful": "The device configuration was updated"
     },
     "error": {
-      "cannot_connect": "Failed to connect to the device"
+      "cannot_connect": "Failed to connect to the device",
+      "unknown": "An unexpected error occurred. Check the Home Assistant logs"
     },
     "step": {
       "reconfigure": {
