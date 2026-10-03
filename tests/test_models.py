@@ -24,6 +24,137 @@ def test_legacy_snapshot(protocol, state):
         state.fan = protocol.models.Fan.HIGH
 
 
+def test_status_capabilities_are_not_writable_claims(protocol, state):
+    assert state.eco is False
+    assert state.turbo is False
+    assert state.beep is True
+    assert state.degree_half is False
+    assert state.display is None
+    assert state.outdoor_temperature is None
+    assert "OutdoorTemp:ambiguous_zero" in state.optional_issues
+    assert state.capabilities.eco
+    assert state.capabilities.turbo
+    assert state.capabilities.beep
+    assert not state.capabilities.display
+    assert not state.capabilities.outdoor_temperature
+    assert dict(state.raw_fields)["OutdoorTemp"] == "0"
+    with pytest.raises(FrozenInstanceError):
+        state.capabilities.eco = False
+
+
+@pytest.mark.parametrize(
+    "tag,attribute",
+    [
+        ("Opt_ECO", "eco"),
+        ("Opt_eco", "eco"),
+        ("Opt_super", "turbo"),
+        ("Opt_display", "display"),
+        ("BeepEnable", "beep"),
+        ("Opt_beep", "beep"),
+        ("Degree_Half", "degree_half"),
+    ],
+)
+@pytest.mark.parametrize("value", ["on", "off", "invalid", ""])
+def test_optional_boolean_values(protocol, status_response, tag, attribute, value):
+    root = ET.fromstring(status_response)
+    status = root.find("statusUpdateMsg")
+    for alias in ("Opt_ECO", "Opt_eco", "BeepEnable", "Opt_beep", tag):
+        if (node := status.find(alias)) is not None:
+            status.remove(node)
+    ET.SubElement(status, tag).text = value
+    result = protocol.api.parse_status(ET.tostring(root))
+    if value in {"on", "off"}:
+        assert getattr(result, attribute) is (value == "on")
+        assert getattr(result.capabilities, attribute)
+    else:
+        assert getattr(result, attribute) is None
+        assert f"{tag}:invalid_value" in result.optional_issues
+    assert result.target_temperature == 77
+
+
+@pytest.mark.parametrize(
+    "tags,attribute",
+    [(("Opt_ECO", "Opt_eco"), "eco"), (("BeepEnable", "Opt_beep"), "beep")],
+)
+@pytest.mark.parametrize("matching", [True, False])
+def test_optional_aliases_do_not_guess_precedence(
+    protocol, status_response, tags, attribute, matching
+):
+    root = ET.fromstring(status_response)
+    status = root.find("statusUpdateMsg")
+    for index, tag in enumerate(tags):
+        node = status.find(tag)
+        if node is None:
+            node = ET.SubElement(status, tag)
+        node.text = "on" if matching or index == 0 else "off"
+    result = protocol.api.parse_status(ET.tostring(root))
+    assert getattr(result, attribute) is (True if matching else None)
+    if not matching:
+        assert all(
+            f"{tag}:conflicting_aliases" in result.optional_issues for tag in tags
+        )
+
+
+@pytest.mark.parametrize(
+    "value,expected",
+    [
+        ("72.123", 72.12),
+        ("-5", -5),
+        ("0", None),
+        ("0.001", None),
+        ("", None),
+        ("NaN", None),
+        ("inf", None),
+        ("unknown", None),
+    ],
+)
+def test_outdoor_temperature_is_conservative(
+    protocol, status_response, value, expected
+):
+    root = ET.fromstring(status_response)
+    root.find("statusUpdateMsg/OutdoorTemp").text = value
+    result = protocol.api.parse_status(ET.tostring(root))
+    assert result.outdoor_temperature == expected
+    assert result.power == protocol.models.Power.ON
+
+
+def test_missing_optional_status(protocol, status_response):
+    root = ET.fromstring(status_response)
+    status = root.find("statusUpdateMsg")
+    for tag in ("Opt_ECO", "Opt_super", "BeepEnable", "Degree_Half", "OutdoorTemp"):
+        status.remove(status.find(tag))
+    result = protocol.api.parse_status(ET.tostring(root))
+    assert all(
+        getattr(result, field) is None
+        for field in ("eco", "turbo", "beep", "degree_half", "outdoor_temperature")
+    )
+    assert result.optional_issues == ()
+
+
+def test_raw_metadata_does_not_trigger_state_change(protocol, state):
+    assert (
+        replace(state, raw_fields=(("Unknown", "different"),), optional_issues=("new",))
+        == state
+    )
+    assert "FirmwareSecret" not in repr(
+        replace(state, raw_fields=(("Unknown", "FirmwareSecret"),))
+    )
+
+
+def test_unknown_extension_is_not_sent_back(protocol, status_response):
+    root = ET.fromstring(status_response)
+    extra = ET.SubElement(root.find("statusUpdateMsg"), "FirmwareExtension")
+    ET.SubElement(extra, "PrivateData").text = "secret"
+    result = protocol.api.parse_status(ET.tostring(root))
+    assert dict(result.raw_fields)["FirmwareExtension"] == "[nested]"
+    assert "secret" not in repr(result)
+    assert "FirmwareExtension" not in fields(
+        protocol.api.build_set_message(result, "123")
+    )
+    assert "Opt_ECO" not in fields(protocol.api.build_set_message(result, "123"))
+    assert "BeepEnable" not in fields(protocol.api.build_set_message(result, "123"))
+
+
 @pytest.mark.parametrize(
     "horizontal,vertical", [(False, False), (False, True), (True, False), (True, True)]
 )

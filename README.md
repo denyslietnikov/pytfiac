@@ -14,6 +14,8 @@ the new implementation has not yet been tested on real air conditioners.
 - Independent horizontal and vertical swing controls, when reported by the device
 - Sleep mode as a climate preset
 - Current and target temperature
+- Optional experimental outdoor-temperature sensor (disabled by default)
+- Privacy-safe diagnostics for reported capabilities and optional status issues
 - Local polling over UDP; no cloud account is required
 
 ## Requirements
@@ -105,6 +107,36 @@ For example, enable both directions in an automation/script action sequence:
 
 Keep `"on"`/`"off"` quoted in YAML. These are two serialized device transactions,
 not one atomic combined command. Entity IDs and config entries do not change.
+
+### Optional status and outdoor temperature
+
+Eco, Turbo, Display, Beep, and `Degree_Half` are decoded when their status fields
+are reported. They are currently available in diagnostics, not as new controls.
+Status support does not prove that a similarly named command field is writable.
+Conflicting aliases or invalid optional values are reported without making the
+main climate entity unavailable.
+
+An **Outdoor temperature** sensor is registered only when the first refresh has
+a finite, nonzero `OutdoorTemp`. It is disabled by default because this field's
+unit and sentinel semantics still need device validation. The implementation
+currently uses the integration's legacy Fahrenheit assumption; HA converts it to
+your selected temperature unit. Do not rely on it for automations until verified
+on your model.
+
+`OutdoorTemp=0` is conservatively treated as unknown, not a confirmed measurement.
+If the field first becomes usable later, reload the integration to create the
+sensor. After creation, missing/invalid/zero values become `unknown`; communication
+failure makes it `unavailable`. The sensor shares the climate coordinator and
+does not open an extra device connection.
+
+### Diagnostics
+
+Use the integration's **Download diagnostics** action in **Settings > Devices &
+services** when reporting a problem. Diagnostics use the existing snapshot and
+do not send AC commands. Host/IP, device name, all stored configuration values,
+and arbitrary firmware values are omitted or redacted. Reported field names,
+decoded statuses, capabilities, optional parse issues, and explicit protocol
+assumptions are included. Review the complete HA-generated report before sharing.
 
 ## Updating and rollback
 

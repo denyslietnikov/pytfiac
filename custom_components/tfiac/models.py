@@ -1,6 +1,7 @@
 """Pure TFIAC protocol models; no Home Assistant dependency."""
 
 from dataclasses import dataclass, replace
+from dataclasses import field as dataclass_field
 from enum import StrEnum
 from math import isfinite
 
@@ -36,6 +37,21 @@ class Fan(StrEnum):
 
 
 @dataclass(frozen=True, slots=True)
+class TfiacCapabilities:
+    """Decoded status capabilities, not evidence that a field is writable."""
+
+    swing_horizontal: bool
+    swing_vertical: bool
+    sleep: bool
+    eco: bool
+    turbo: bool
+    display: bool
+    beep: bool
+    outdoor_temperature: bool
+    degree_half: bool
+
+
+@dataclass(frozen=True, slots=True)
 class TfiacState:
     """An immutable snapshot read from the device."""
 
@@ -48,6 +64,31 @@ class TfiacState:
     swing_horizontal: bool | None = None
     swing_vertical: bool | None = None
     sleep: str | None = None
+    eco: bool | None = None
+    turbo: bool | None = None
+    display: bool | None = None
+    beep: bool | None = None
+    outdoor_temperature: float | None = None
+    degree_half: bool | None = None
+    # Never publish raw XML values as entity attributes or log them by default.
+    raw_fields: tuple[tuple[str, str], ...] = dataclass_field(
+        default=(), compare=False, repr=False
+    )
+    optional_issues: tuple[str, ...] = dataclass_field(default=(), compare=False)
+
+    @property
+    def capabilities(self) -> TfiacCapabilities:
+        return TfiacCapabilities(
+            swing_horizontal=self.swing_horizontal is not None,
+            swing_vertical=self.swing_vertical is not None,
+            sleep=self.sleep is not None,
+            eco=self.eco is not None,
+            turbo=self.turbo is not None,
+            display=self.display is not None,
+            beep=self.beep is not None,
+            outdoor_temperature=self.outdoor_temperature is not None,
+            degree_half=self.degree_half is not None,
+        )
 
 
 @dataclass(frozen=True, slots=True)

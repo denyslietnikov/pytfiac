@@ -6,7 +6,7 @@ from homeassistant.core import HomeAssistant
 from .api import TfiacClient
 from .coordinator import TfiacConfigEntry, TfiacCoordinator
 
-PLATFORMS = [Platform.CLIMATE]
+PLATFORMS = [Platform.CLIMATE, Platform.SENSOR]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: TfiacConfigEntry) -> bool:

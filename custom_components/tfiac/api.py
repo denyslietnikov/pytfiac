@@ -13,6 +13,27 @@ from .models import Fan, Operation, Power, TfiacChanges, TfiacState, apply_chang
 UDP_PORT = 7777
 MAX_DATAGRAM_SIZE = 16384
 REQUEST_TIMEOUT = 5
+KNOWN_STATUS_FIELDS = frozenset(
+    {
+        "TurnOn",
+        "BaseMode",
+        "SetTemp",
+        "WindSpeed",
+        "IndoorTemp",
+        "DeviceName",
+        "WindDirection_H",
+        "WindDirection_V",
+        "Opt_sleepMode",
+        "Opt_ECO",
+        "Opt_eco",
+        "Opt_super",
+        "Opt_display",
+        "BeepEnable",
+        "Opt_beep",
+        "OutdoorTemp",
+        "Degree_Half",
+    }
+)
 
 
 class TfiacError(Exception):
@@ -64,9 +85,45 @@ def parse_status(response: bytes) -> TfiacState:
     status = statuses[0]
     fields: dict[str, str] = {}
     for child in status:
-        if child.tag in fields or len(child):
+        if child.tag in fields or (len(child) and child.tag in KNOWN_STATUS_FIELDS):
             raise TfiacParseError("Repeated or nested status field")
-        fields[child.tag] = (child.text or "").strip()
+        # Unknown nested extensions are not control fields. Do not retain their
+        # arbitrary contents, but do record the tag for later protocol inspection.
+        fields[child.tag] = "[nested]" if len(child) else (child.text or "").strip()
+
+    optional_issues: list[str] = []
+
+    def optional_power(*aliases: str) -> bool | None:
+        present = [alias for alias in aliases if alias in fields]
+        if not present:
+            return None
+        try:
+            values = {Power(fields[alias]) == Power.ON for alias in present}
+        except ValueError:
+            optional_issues.extend(f"{alias}:invalid_value" for alias in present)
+            return None
+        if len(values) != 1:
+            optional_issues.extend(f"{alias}:conflicting_aliases" for alias in present)
+            return None
+        return values.pop()
+
+    def outdoor_temperature() -> float | None:
+        if "OutdoorTemp" not in fields:
+            return None
+        try:
+            value = float(fields["OutdoorTemp"])
+            if not isfinite(value):
+                raise ValueError("Not finite")
+        except ValueError:
+            optional_issues.append("OutdoorTemp:invalid_value")
+            return None
+        # The supplied sample has 0, which may be a sentinel. Do not fabricate a
+        # measurement (or treat it as confirmed 0 °F) before hardware validation.
+        value = round(value, 2)
+        if value == 0:
+            optional_issues.append("OutdoorTemp:ambiguous_zero")
+            return None
+        return value
 
     def temperature(field: str) -> float:
         value = float(fields[field])
@@ -95,6 +152,14 @@ def parse_status(response: bytes) -> TfiacState:
             swing_horizontal=direction("WindDirection_H"),
             swing_vertical=direction("WindDirection_V"),
             sleep=sleep,
+            eco=optional_power("Opt_ECO", "Opt_eco"),
+            turbo=optional_power("Opt_super"),
+            display=optional_power("Opt_display"),
+            beep=optional_power("BeepEnable", "Opt_beep"),
+            outdoor_temperature=outdoor_temperature(),
+            degree_half=optional_power("Degree_Half"),
+            raw_fields=tuple(sorted(fields.items())),
+            optional_issues=tuple(optional_issues),
         )
     except (KeyError, ValueError) as err:
         raise TfiacParseError("Invalid or missing status field") from err
