@@ -1,13 +1,4 @@
-"""Test client capabilities."""
-
-import asyncio
-import socket
-
-from tellsticknet.util import sock_recvfrom, sock_sendto
-
-import pytfiac
-
-STATUSUPDATEMSG = """<msg msgid="statusUpdateMsg" type="Control" seq="555">
+<msg msgid="statusUpdateMsg" type="Control" seq="555">
   <statusUpdateMsg>
     <BaseMode>selfFeel</BaseMode>
     <TurnOn>on</TurnOn>
@@ -35,31 +26,3 @@ STATUSUPDATEMSG = """<msg msgid="statusUpdateMsg" type="Control" seq="555">
     <DeviceName>Katie AC</DeviceName>
   </statusUpdateMsg>
 </msg>
-"""
-
-loop = asyncio.get_event_loop()
-
-sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM, 0)
-sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-sock.setblocking(False)
-
-host = "localhost"
-port = pytfiac.UDP_PORT
-
-sock.bind((host, port))
-
-
-async def mock_tfiac(sock):
-    """Mock tfiac unit."""
-    while True:
-        data, addr = await sock_recvfrom(sock, 2048)
-        if 'msgid="SyncStatusReq"' in data.decode():
-            data = STATUSUPDATEMSG.encode()
-        await sock_sendto(sock, data, addr)
-
-
-if __name__ == "__main__":
-    try:
-        loop.run_until_complete(mock_tfiac(sock))
-    finally:
-        loop.close()

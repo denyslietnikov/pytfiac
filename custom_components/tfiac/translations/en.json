@@ -1,0 +1,27 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "This device is already configured",
+      "reconfigure_successful": "The device configuration was updated"
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to the device"
+    },
+    "step": {
+      "reconfigure": {
+        "data": {
+          "host": "Host"
+        },
+        "description": "Enter the new IP address or hostname of the TFIAC device",
+        "title": "Reconfigure TFIAC"
+      },
+      "user": {
+        "data": {
+          "host": "Host"
+        },
+        "description": "Enter the IP address or hostname of the TFIAC device",
+        "title": "Connect to TFIAC"
+      }
+    }
+  }
+}

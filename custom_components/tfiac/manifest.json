@@ -1,12 +1,13 @@
 {
   "domain": "tfiac",
   "name": "TFIAC",
-  "codeowners": ["@fredrike"],
+  "codeowners": ["@denyslietnikov"],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://www.home-assistant.io/integrations/tfiac/",
+  "documentation": "https://github.com/denyslietnikov/pytfiac#readme",
   "integration_type": "device",
   "iot_class": "local_polling",
-  "requirements": [],
-  "version": "0.5.0"
+  "issue_tracker": "https://github.com/denyslietnikov/pytfiac/issues",
+  "requirements": ["xmltodict==1.0.4"],
+  "version": "0.5.1"
 }

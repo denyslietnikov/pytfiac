@@ -70,16 +70,16 @@ UPDATE_MESSAGE = (
 )
 
 SET_SWING_OFF = (
-    "<WindDirection_H>off</WindDirection_H>" "<WindDirection_V>off</WindDirection_V>"
+    "<WindDirection_H>off</WindDirection_H><WindDirection_V>off</WindDirection_V>"
 )
 SET_SWING_3D = (
-    "<WindDirection_H>on</WindDirection_H>" "<WindDirection_V>on</WindDirection_V>"
+    "<WindDirection_H>on</WindDirection_H><WindDirection_V>on</WindDirection_V>"
 )
 SET_SWING_VERTICAL = (
-    "<WindDirection_H>off</WindDirection_H>" "<WindDirection_V>on</WindDirection_V>"
+    "<WindDirection_H>off</WindDirection_H><WindDirection_V>on</WindDirection_V>"
 )
 SET_SWING_HORIZONTAL = (
-    "<WindDirection_H>on</WindDirection_H>" "<WindDirection_V>off</WindDirection_V>"
+    "<WindDirection_H>on</WindDirection_H><WindDirection_V>off</WindDirection_V>"
 )
 
 SET_SWING = {
