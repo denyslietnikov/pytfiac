@@ -4,14 +4,21 @@ from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
 
 from .api import TfiacClient
+from .const import CONF_COMMAND_PROFILE
 from .coordinator import TfiacConfigEntry, TfiacCoordinator
+from .models import CommandProfile
 
-PLATFORMS = [Platform.CLIMATE, Platform.SENSOR]
+PLATFORMS = [Platform.CLIMATE, Platform.SENSOR, Platform.SWITCH]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: TfiacConfigEntry) -> bool:
     """Retry setup automatically when the first device read fails."""
-    client = TfiacClient(entry.options.get(CONF_HOST, entry.data[CONF_HOST]))
+    client = TfiacClient(
+        entry.options.get(CONF_HOST, entry.data[CONF_HOST]),
+        command_profile=CommandProfile(
+            entry.options.get(CONF_COMMAND_PROFILE, CommandProfile.DISABLED)
+        ),
+    )
     coordinator = TfiacCoordinator(hass, entry, client)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator

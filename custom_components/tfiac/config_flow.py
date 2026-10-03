@@ -6,13 +6,20 @@ import logging
 from typing import Any
 
 import voluptuous as vol
-from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigFlow,
+    ConfigFlowResult,
+    OptionsFlowWithReload,
+)
 from homeassistant.const import CONF_HOST
+from homeassistant.core import callback
 from homeassistant.data_entry_flow import AbortFlow
+from homeassistant.helpers import selector
 
 from .api import TfiacClient, TfiacError
-from .const import DOMAIN
-from .models import TfiacState
+from .const import CONF_COMMAND_PROFILE, DOMAIN
+from .models import CommandProfile, TfiacState
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,6 +28,12 @@ class TfiacConfigFlow(ConfigFlow, domain=DOMAIN):
     """No stable hardware ID is known; keep identity local to each config entry."""
 
     VERSION = 1
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry: ConfigEntry) -> TfiacOptionsFlow:
+        """Options configure experimental protocol contracts, not the host."""
+        return TfiacOptionsFlow()
 
     def _abort_if_host_configured(self, host: str) -> None:
         # HA's generic matcher checks both data and options. For legacy entries
@@ -94,6 +107,47 @@ class TfiacConfigFlow(ConfigFlow, domain=DOMAIN):
                         CONF_HOST,
                         default=entry.options.get(CONF_HOST, entry.data[CONF_HOST]),
                     ): str
+                }
+            ),
+            errors=errors,
+        )
+
+
+class TfiacOptionsFlow(OptionsFlowWithReload):
+    """An explicit opt-in; loading or changing options sends no write commands."""
+
+    async def async_step_init(
+        self, user_input: dict[str, Any] | None = None
+    ) -> ConfigFlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            try:
+                profile = CommandProfile(user_input[CONF_COMMAND_PROFILE])
+            except (KeyError, ValueError, TypeError):
+                errors[CONF_COMMAND_PROFILE] = "invalid_profile"
+            else:
+                return self.async_create_entry(
+                    data={
+                        **self.config_entry.options,
+                        CONF_COMMAND_PROFILE: profile.value,
+                    }
+                )
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema(
+                {
+                    vol.Required(
+                        CONF_COMMAND_PROFILE,
+                        default=self.config_entry.options.get(
+                            CONF_COMMAND_PROFILE, CommandProfile.DISABLED.value
+                        ),
+                    ): selector.SelectSelector(
+                        selector.SelectSelectorConfig(
+                            options=[profile.value for profile in CommandProfile],
+                            translation_key="command_profile",
+                            mode=selector.SelectSelectorMode.DROPDOWN,
+                        )
+                    )
                 }
             ),
             errors=errors,

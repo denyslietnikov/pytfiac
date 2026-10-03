@@ -25,7 +25,35 @@
       }
     }
   },
+  "options": {
+    "error": {
+      "invalid_profile": "Select a supported command profile"
+    },
+    "step": {
+      "init": {
+        "title": "Optional controls",
+        "description": "Keep Disabled for normal use. The experimental legacy profile assumes unverified command fields for Eco, Turbo, Panel light and Beep feedback. It does not prove firmware support or mode compatibility. After opting in, enable individual switch entities for hardware testing. Changing this option reloads the integration but sends no AC commands.",
+        "data": {
+          "command_profile": "Optional command profile"
+        }
+      }
+    }
+  },
+  "selector": {
+    "command_profile": {
+      "options": {
+        "disabled": "Disabled (recommended)",
+        "legacy_experimental": "Experimental legacy commands (unverified)"
+      }
+    }
+  },
   "entity": {
+    "switch": {
+      "eco": {"name": "Eco"},
+      "turbo": {"name": "Turbo"},
+      "display": {"name": "Panel light"},
+      "beep": {"name": "Beep feedback"}
+    },
     "sensor": {
       "outdoor_temperature": {
         "name": "Outdoor temperature"

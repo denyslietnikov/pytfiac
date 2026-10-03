@@ -8,6 +8,26 @@ from math import isfinite
 MIN_TEMP = 61
 MAX_TEMP = 88
 SLEEP_MODE_ON = "sleepMode1:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0"
+OPTIONAL_CONTROL_FIELDS = ("eco", "turbo", "display", "beep")
+
+
+class CommandProfile(StrEnum):
+    """Explicit opt-in contracts, never inferred from a reported status tag."""
+
+    DISABLED = "disabled"
+    LEGACY_EXPERIMENTAL = "legacy_experimental"
+
+    @property
+    def command_fields(self) -> tuple[tuple[str, str], ...]:
+        """Unverified legacy spellings; hardware validation is still required."""
+        if self == self.LEGACY_EXPERIMENTAL:
+            return (
+                ("eco", "Opt_eco"),
+                ("turbo", "Opt_super"),
+                ("display", "Opt_display"),
+                ("beep", "Opt_beep"),
+            )
+        return ()
 
 
 class Power(StrEnum):
@@ -93,7 +113,7 @@ class TfiacState:
 
 @dataclass(frozen=True, slots=True)
 class TfiacChanges:
-    """Only writable fields; None means leave unchanged."""
+    """Requested fields; optional writes also require a client command profile."""
 
     power: Power | None = None
     operation: Operation | None = None
@@ -102,6 +122,10 @@ class TfiacChanges:
     swing_horizontal: bool | None = None
     swing_vertical: bool | None = None
     sleep: bool | None = None
+    eco: bool | None = None
+    turbo: bool | None = None
+    display: bool | None = None
+    beep: bool | None = None
 
 
 def apply_changes(state: TfiacState, changes: TfiacChanges) -> TfiacState:
@@ -127,4 +151,11 @@ def apply_changes(state: TfiacState, changes: TfiacChanges) -> TfiacState:
         if state.sleep is None:
             raise ValueError("Device does not report sleep mode")
         updates["sleep"] = SLEEP_MODE_ON if changes.sleep else "off"
+    for field in OPTIONAL_CONTROL_FIELDS:
+        if (value := getattr(changes, field)) is not None:
+            if not isinstance(value, bool):
+                raise ValueError(f"{field} must be a boolean")
+            if getattr(state, field) is None:
+                raise ValueError(f"Device does not report a usable {field} status")
+            updates[field] = value
     return replace(state, **updates)

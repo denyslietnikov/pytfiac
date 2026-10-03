@@ -8,6 +8,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.tfiac.api import TfiacTimeoutError
+from custom_components.tfiac.models import CommandProfile
 
 pytestmark = pytest.mark.asyncio
 
@@ -60,6 +61,8 @@ async def test_legacy_host_and_name(hass, entry, client):
     ) as constructor:
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
-    constructor.assert_called_once_with("192.0.2.2")
+    constructor.assert_called_once_with(
+        "192.0.2.2", command_profile=CommandProfile.DISABLED
+    )
     devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
     assert devices[0].name == "Bedroom"

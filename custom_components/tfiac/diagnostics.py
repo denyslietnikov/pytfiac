@@ -23,6 +23,7 @@ async def async_get_config_entry_diagnostics(
         "reported_fields": [],
         "optional_issues": [],
         "last_error_type": None,
+        "optional_command_contract": None,
     }
     if not hasattr(entry, "runtime_data"):
         return base
@@ -39,6 +40,11 @@ async def async_get_config_entry_diagnostics(
             else None
         ),
         "capabilities": asdict(state.capabilities),
+        "optional_command_contract": {
+            "profile": coordinator.client.command_profile.value,
+            "hardware_validated": False,
+            "command_fields": dict(coordinator.client.command_profile.command_fields),
+        },
         "status": {
             "name": REDACTED if state.name is not None else None,
             "power": state.power,

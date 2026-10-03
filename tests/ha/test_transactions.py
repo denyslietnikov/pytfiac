@@ -28,8 +28,8 @@ class XmlDevice:
         self.fail_next_read = False
         self.reject_write = False
 
-    def client(self, host):
-        client = TfiacClient(host)
+    def client(self, host, **kwargs):
+        client = TfiacClient(host, **kwargs)
         client._send = self.send
         self.clients.append(client)
         return client

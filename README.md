@@ -13,6 +13,7 @@ the new implementation has not yet been tested on real air conditioners.
 - Fan-speed control
 - Independent horizontal and vertical swing controls, when reported by the device
 - Sleep mode as a climate preset
+- Experimental Eco, Turbo, Panel light, and Beep feedback switches (explicit opt-in)
 - Current and target temperature
 - Optional experimental outdoor-temperature sensor (disabled by default)
 - Privacy-safe diagnostics for reported capabilities and optional status issues
@@ -111,7 +112,7 @@ not one atomic combined command. Entity IDs and config entries do not change.
 ### Optional status and outdoor temperature
 
 Eco, Turbo, Display, Beep, and `Degree_Half` are decoded when their status fields
-are reported. They are currently available in diagnostics, not as new controls.
+are reported. Diagnostics include these decoded states even with controls disabled.
 Status support does not prove that a similarly named command field is writable.
 Conflicting aliases or invalid optional values are reported without making the
 main climate entity unavailable.
@@ -129,6 +130,48 @@ sensor. After creation, missing/invalid/zero values become `unknown`; communicat
 failure makes it `unavailable`. The sensor shares the climate coordinator and
 does not open an extra device connection.
 
+### Experimental optional controls
+
+Normal installations keep **Optional command profile: Disabled**. For the future
+hardware test cycle, **Configure** on the TFIAC integration offers an explicit
+**Experimental legacy commands (unverified)** profile. Selecting it reloads the
+integration with a status read, but sends no write commands. No real-device test
+is required at this stage of development.
+
+The profile creates **Eco**, **Turbo**, **Panel light**, and **Beep feedback**
+switches only for usable initial statuses. Each switch is also disabled by default;
+enable individual entities on the device page only when ready to test them.
+Missing/conflicting/invalid initial flags create no switch; reload if the field
+becomes usable later. Existing switches show `unknown` for unusable statuses and
+`unavailable` for communication errors. Disabling the profile unloads these
+controls; their registry IDs remain for a later opt-in.
+
+This profile is an explicit hypothesis, not automatic firmware detection:
+
+| Switch | Read status | Assumed command field |
+|---|---|---|
+| Eco | `Opt_ECO` / `Opt_eco` | `Opt_eco` |
+| Turbo | `Opt_super` | `Opt_super` |
+| Panel light | `Opt_display` | `Opt_display` |
+| Beep feedback | `BeepEnable` / `Opt_beep` | `Opt_beep` |
+
+Command spellings come from the legacy Homebridge writer; the profile assumes
+`on/off` flags and **persistent** beep feedback, not a one-shot beep button. Their
+spelling, payload shape, persistence, and mode interactions still need hardware
+validation. A reported status field alone never enables writes.
+
+Each action uses the shared read/write/read transaction: fresh power, operation,
+temperature, fan and existing Sleep profile plus **one requested optional flag**.
+Unrelated optional flags, swing, `Degree_Half`, and unknown firmware fields are
+not echoed into the command. It does not force power on, reset another mode, or
+invent Sleep/Eco/Turbo exclusion rules. The subsequent status read is the only
+source of the published result; an ACK does not prove the change was applied and
+writes are never retried automatically.
+
+Sleep retains its existing climate preset; Eco and Turbo are deliberately not
+additional presets until mutual exclusion is verified. Do not rely on these
+experimental controls for automations before validation on your model.
+
 ### Diagnostics
 
 Use the integration's **Download diagnostics** action in **Settings > Devices &
@@ -136,7 +179,8 @@ services** when reporting a problem. Diagnostics use the existing snapshot and
 do not send AC commands. Host/IP, device name, all stored configuration values,
 and arbitrary firmware values are omitted or redacted. Reported field names,
 decoded statuses, capabilities, optional parse issues, and explicit protocol
-assumptions are included. Review the complete HA-generated report before sharing.
+assumptions (including the active optional command contract) are included. Review
+the complete HA-generated report before sharing.
 
 ## Updating and rollback
 

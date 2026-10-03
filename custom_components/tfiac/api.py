@@ -8,7 +8,16 @@ from math import isfinite
 from time import time_ns
 from xml.etree import ElementTree as ET
 
-from .models import Fan, Operation, Power, TfiacChanges, TfiacState, apply_changes
+from .models import (
+    OPTIONAL_CONTROL_FIELDS,
+    CommandProfile,
+    Fan,
+    Operation,
+    Power,
+    TfiacChanges,
+    TfiacState,
+    apply_changes,
+)
 
 UDP_PORT = 7777
 MAX_DATAGRAM_SIZE = 16384
@@ -178,8 +187,8 @@ def build_status_message(seq: str) -> bytes:
     return _envelope("SyncStatusReq", [], seq)
 
 
-def build_set_message(state: TfiacState, seq: str) -> bytes:
-    """Build the legacy full-state command, omitting absent optional fields."""
+def _full_state_fields(state: TfiacState) -> list[tuple[str, str]]:
+    """The existing command subset, never an echo of arbitrary status tags."""
     fields = [
         ("TurnOn", str(state.power)),
         ("BaseMode", str(state.operation)),
@@ -188,7 +197,12 @@ def build_set_message(state: TfiacState, seq: str) -> bytes:
     ]
     if state.sleep is not None:
         fields.append(("Opt_sleepMode", state.sleep))
-    return _envelope("SetMessage", fields, seq)
+    return fields
+
+
+def build_set_message(state: TfiacState, seq: str) -> bytes:
+    """Build the legacy full-state command, omitting absent optional fields."""
+    return _envelope("SetMessage", _full_state_fields(state), seq)
 
 
 def build_swing_message(state: TfiacState, seq: str) -> bytes:
@@ -204,6 +218,31 @@ def build_swing_message(state: TfiacState, seq: str) -> bytes:
     if not fields:
         raise ValueError("Device does not report swing")
     return _envelope("SetMessage", fields, seq)
+
+
+def build_optional_message(
+    state: TfiacState, changes: TfiacChanges, profile: CommandProfile, seq: str
+) -> bytes:
+    """Legacy full-state envelope plus exactly one explicitly requested flag.
+
+    Preserve fresh core/sleep state, but never echo unrelated optional/raw fields.
+    This experimental wire contract is not a claim about all device firmware.
+    """
+    requested = [
+        field
+        for field in OPTIONAL_CONTROL_FIELDS
+        if getattr(changes, field) is not None
+    ]
+    if len(requested) != 1 or not profile.command_fields:
+        raise ValueError("Optional controls require an enabled profile and one flag")
+    field = requested[0]
+    tag = dict(profile.command_fields)[field]
+    value = getattr(state, field)
+    if not isinstance(value, bool):
+        raise ValueError(f"Device does not report a usable {field} status")
+    return _envelope(
+        "SetMessage", [*_full_state_fields(state), (tag, "on" if value else "off")], seq
+    )
 
 
 class _ResponseProtocol(asyncio.DatagramProtocol):
@@ -232,8 +271,11 @@ class _ResponseProtocol(asyncio.DatagramProtocol):
 class TfiacClient:
     """Serialize status reads and complete read/write/read transactions."""
 
-    def __init__(self, host: str) -> None:
+    def __init__(
+        self, host: str, *, command_profile: CommandProfile = CommandProfile.DISABLED
+    ) -> None:
         self.host = host
+        self.command_profile = CommandProfile(command_profile)
         self._lock = asyncio.Lock()
         self._last_sequence = 0
 
@@ -282,6 +324,20 @@ class TfiacClient:
             getattr(changes, field) is not None
             for field in ("power", "operation", "target_temperature", "fan", "sleep")
         )
+        optional = [
+            field
+            for field in OPTIONAL_CONTROL_FIELDS
+            if getattr(changes, field) is not None
+        ]
+        if optional and (
+            not self.command_profile.command_fields
+            or len(optional) != 1
+            or swing
+            or full_state
+        ):
+            raise ValueError(
+                "Optional controls require an enabled profile and a separate single-flag command"
+            )
         if swing and full_state:
             raise ValueError("Swing and full-state changes require separate commands")
         async with self._lock:
@@ -292,7 +348,14 @@ class TfiacClient:
             builder: Callable[[TfiacState, str], bytes] = (
                 build_swing_message if swing else build_set_message
             )
-            response = await self._send(builder(desired, self._sequence()))
+            message = (
+                build_optional_message(
+                    desired, changes, self.command_profile, self._sequence()
+                )
+                if optional
+                else builder(desired, self._sequence())
+            )
+            response = await self._send(message)
             # An acknowledgement is not evidence that the desired state was applied.
             _parse_xml(response)
             return await self._read_status()
