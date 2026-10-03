@@ -88,6 +88,36 @@ def test_noop_does_not_write(protocol, status_response):
     asyncio.run(scenario())
 
 
+def test_cancelled_transaction_releases_lock(protocol, status_response):
+    async def scenario():
+        client = protocol.api.TfiacClient("192.0.2.1")
+        reading_after_write = asyncio.Event()
+        read_count = 0
+
+        async def send(message):
+            nonlocal read_count
+            if ET.fromstring(message).get("msgid") == "SetMessage":
+                return b"<msg><SetMessage /></msg>"
+            read_count += 1
+            if read_count == 2:
+                reading_after_write.set()
+                await asyncio.Event().wait()
+            return status_response
+
+        client._send = send
+        transaction = asyncio.create_task(
+            client.async_apply_changes(protocol.models.TfiacChanges(sleep=True))
+        )
+        await asyncio.wait_for(reading_after_write.wait(), timeout=1)
+        transaction.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await transaction
+        result = await asyncio.wait_for(client.async_update(), timeout=1)
+        assert result.sleep == "off"
+
+    asyncio.run(scenario())
+
+
 def test_mixed_payload_rejected(protocol):
     async def scenario():
         client = protocol.api.TfiacClient("192.0.2.1")
@@ -105,7 +135,16 @@ def test_mixed_payload_rejected(protocol):
 
 @pytest.mark.parametrize(
     "outcome",
-    ["success", "timeout", "cancel", "socket_error", "send_error", "oversize"],
+    [
+        "success",
+        "timeout",
+        "cancel",
+        "socket_error",
+        "send_error",
+        "oversize",
+        "error_received",
+        "connection_lost",
+    ],
 )
 def test_udp_transport_cleanup(protocol, monkeypatch, outcome):
     async def scenario():
@@ -124,6 +163,14 @@ def test_udp_transport_cleanup(protocol, monkeypatch, outcome):
         monkeypatch.setattr(loop, "create_datagram_endpoint", endpoint)
         if outcome == "send_error":
             transport.sendto.side_effect = OSError("send failed")
+        elif outcome == "error_received":
+            transport.sendto.side_effect = lambda message: received.error_received(
+                OSError("UDP error callback")
+            )
+        elif outcome == "connection_lost":
+            transport.sendto.side_effect = lambda message: received.connection_lost(
+                None
+            )
         elif outcome in ("success", "oversize"):
             transport.sendto.side_effect = lambda message: received.datagram_received(
                 b"x" * (16385 if outcome == "oversize" else 1), ("192.0.2.1", 7777)

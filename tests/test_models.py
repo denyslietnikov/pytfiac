@@ -107,6 +107,13 @@ def test_duplicate_field_rejected(protocol, status_response):
         protocol.api.parse_status(ET.tostring(root))
 
 
+def test_duplicate_status_rejected(protocol, status_response):
+    root = ET.fromstring(status_response)
+    root.append(ET.fromstring(status_response).find("statusUpdateMsg"))
+    with pytest.raises(protocol.api.TfiacProtocolError):
+        protocol.api.parse_status(ET.tostring(root))
+
+
 def test_operation_turns_on(protocol, state):
     desired = protocol.models.apply_changes(
         replace(state, power=protocol.models.Power.OFF),

@@ -1,5 +1,6 @@
 """Exercise HA's actual flow manager, including legacy entries."""
 
+import asyncio
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -63,6 +64,68 @@ async def test_duplicate(hass, entry, client, options):
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "already_configured"
     client.async_update.assert_not_awaited()
+
+
+async def test_legacy_overridden_host_is_not_reserved(hass, entry, client):
+    hass.config_entries.async_update_entry(entry, options={"host": "192.0.2.2"})
+    with patch("custom_components.tfiac.async_setup_entry", return_value=True):
+        result = await hass.config_entries.flow.async_init(
+            "tfiac", context={"source": SOURCE_USER}, data={"host": "192.0.2.1"}
+        )
+        await hass.async_block_till_done()
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert len(hass.config_entries.async_entries("tfiac")) == 2
+    assert entry.options == {"host": "192.0.2.2"}
+
+
+async def test_concurrent_user_flows_do_not_create_duplicates(hass, client, ha_state):
+    started = asyncio.Event()
+    release = asyncio.Event()
+    calls = 0
+
+    async def validate():
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            started.set()
+        await release.wait()
+        return ha_state
+
+    client.async_update.side_effect = validate
+    with patch("custom_components.tfiac.async_setup_entry", return_value=True):
+        first = asyncio.create_task(
+            hass.config_entries.flow.async_init(
+                "tfiac", context={"source": SOURCE_USER}, data={"host": "192.0.2.1"}
+            )
+        )
+        second = asyncio.create_task(
+            hass.config_entries.flow.async_init(
+                "tfiac", context={"source": SOURCE_USER}, data={"host": "192.0.2.1"}
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=1)
+        release.set()
+        results = await asyncio.wait_for(asyncio.gather(first, second), timeout=1)
+        await hass.async_block_till_done()
+    assert {result["type"] for result in results} == {
+        FlowResultType.CREATE_ENTRY,
+        FlowResultType.ABORT,
+    }
+    assert len(hass.config_entries.async_entries("tfiac")) == 1
+
+
+async def test_reconfigure_same_host(hass, entry, client):
+    with patch.object(
+        hass.config_entries, "async_reload", AsyncMock(return_value=True)
+    ):
+        result = await hass.config_entries.flow.async_init(
+            "tfiac",
+            context={"source": SOURCE_RECONFIGURE, "entry_id": entry.entry_id},
+            data={"host": "192.0.2.1"},
+        )
+        await hass.async_block_till_done()
+    assert result["reason"] == "reconfigure_successful"
+    assert entry.unique_id == "legacy-id"
 
 
 async def test_reconfigure_preserves_identity_and_options(hass, entry, client):

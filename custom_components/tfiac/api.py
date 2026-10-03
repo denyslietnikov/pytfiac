@@ -58,9 +58,10 @@ def _parse_xml(response: bytes) -> ET.Element:
 def parse_status(response: bytes) -> TfiacState:
     """Parse known status fields; tolerate absent optional capabilities."""
     root = _parse_xml(response)
-    status = root.find("statusUpdateMsg")
-    if status is None:
-        raise TfiacProtocolError("Response does not contain statusUpdateMsg")
+    statuses = root.findall("statusUpdateMsg")
+    if len(statuses) != 1:
+        raise TfiacProtocolError("Response must contain exactly one statusUpdateMsg")
+    status = statuses[0]
     fields: dict[str, str] = {}
     for child in status:
         if child.tag in fields or len(child):

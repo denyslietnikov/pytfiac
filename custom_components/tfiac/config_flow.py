@@ -23,8 +23,8 @@ class TfiacConfigFlow(ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     def _abort_if_host_configured(self, host: str) -> None:
-        self._async_abort_entries_match({CONF_HOST: host})
-        # Older entries may hold the effective host in options instead of data.
+        # HA's generic matcher checks both data and options. For legacy entries
+        # with a host override only the effective host is actually in use.
         for entry in self._async_current_entries(include_ignore=False):
             if entry.entry_id == self.context.get("entry_id"):
                 continue
