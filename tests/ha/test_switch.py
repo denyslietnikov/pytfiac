@@ -141,8 +141,8 @@ async def test_opted_in_entities_disabled_by_default_and_share_device(
     assert {item.original_name for item in registered} == {
         "Eco",
         "Turbo",
-        "Panel light",
-        "Beep feedback",
+        "Display",
+        "Beep",
     }
     assert all(
         item.disabled_by == er.RegistryEntryDisabler.INTEGRATION for item in registered

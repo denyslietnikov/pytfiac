@@ -6,13 +6,18 @@ on:
     branches:
       - develop
       - master
+  release:
+    types:
+      - published
+  schedule:
+    - cron: "23 4 * * 1"
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -21,10 +26,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: pip
@@ -39,15 +44,15 @@ jobs:
           ruff format --check custom_components tests
 
       - name: Run tests
-        run: pytest tests/test_api.py tests/test_models.py tests/test_metadata.py
+        run: pytest --ignore=tests/ha
 
   home-assistant:
     name: Home Assistant (2026.9.4)
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.14"
           cache: pip
@@ -55,3 +60,21 @@ jobs:
       - run: python -m pip install --requirement requirements_test_ha.txt
       - name: Test against real HA APIs without network access
         run: pytest --disable-socket --allow-unix-socket --cov=custom_components.tfiac --cov-report=term-missing
+
+  hacs:
+    name: HACS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate HACS repository
+        uses: hacs/action@main
+        with:
+          category: integration
+
+  hassfest:
+    name: Hassfest
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+      - name: Validate Home Assistant integration
+        uses: home-assistant/actions/hassfest@master

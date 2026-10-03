@@ -7,6 +7,7 @@ from homeassistant.components.diagnostics import REDACTED, async_redact_data
 from homeassistant.core import HomeAssistant
 
 from .coordinator import TfiacConfigEntry
+from .models import MAX_TEMP, MIN_TEMP, TEMPERATURE_DECIMAL_PLACES
 
 
 async def async_get_config_entry_diagnostics(
@@ -69,6 +70,14 @@ async def async_get_config_entry_diagnostics(
         "notes": {
             "decoded_status_does_not_prove_writability": True,
             "temperature_unit_assumption": "legacy Fahrenheit",
+            "target_temperature_contract": {
+                "native_min": MIN_TEMP,
+                "native_max": MAX_TEMP,
+                "numeric_decimal_places": TEMPERATURE_DECIMAL_PLACES,
+                "hardware_step": None,
+                "degree_half_determines_step": False,
+                "out_of_range_requests_are_clamped": False,
+            },
             "outdoor_zero_is_treated_as_unknown": True,
             "raw_values_are_not_exported": True,
         },

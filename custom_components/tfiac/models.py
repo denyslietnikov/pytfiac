@@ -3,10 +3,11 @@
 from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
 from enum import StrEnum
-from math import isfinite
 
 MIN_TEMP = 61
 MAX_TEMP = 88
+# Existing status decoder precision, not a hardware setpoint increment.
+TEMPERATURE_DECIMAL_PLACES = 2
 SLEEP_MODE_ON = "sleepMode1:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0"
 OPTIONAL_CONTROL_FIELDS = ("eco", "turbo", "display", "beep")
 
@@ -128,6 +129,23 @@ class TfiacChanges:
     beep: bool | None = None
 
 
+def normalize_target_temperature(temperature: float) -> float:
+    """Validate native legacy Fahrenheit and match the status decoder precision.
+
+    Do not infer a physical temperature step, quantize to whole degrees, clamp an
+    out-of-range request, or convert units a second time after HA has done so.
+    """
+    if (
+        isinstance(temperature, bool)
+        or not isinstance(temperature, (int, float))
+        or not MIN_TEMP <= temperature <= MAX_TEMP
+    ):
+        raise ValueError(
+            f"Target temperature must be a finite number in {MIN_TEMP}–{MAX_TEMP} °F"
+        )
+    return round(float(temperature), TEMPERATURE_DECIMAL_PLACES)
+
+
 def apply_changes(state: TfiacState, changes: TfiacChanges) -> TfiacState:
     """Validate requested changes without inventing device-specific rules."""
     updates = {}
@@ -139,9 +157,7 @@ def apply_changes(state: TfiacState, changes: TfiacChanges) -> TfiacState:
             raise ValueError("Cannot select an operation and turn off together")
         updates["power"] = Power.ON
     if (temperature := changes.target_temperature) is not None:
-        if not isfinite(temperature) or not MIN_TEMP <= temperature <= MAX_TEMP:
-            raise ValueError(f"Target temperature must be {MIN_TEMP}–{MAX_TEMP} °F")
-        updates["target_temperature"] = float(temperature)
+        updates["target_temperature"] = normalize_target_temperature(temperature)
     for field in ("swing_horizontal", "swing_vertical"):
         if (value := getattr(changes, field)) is not None:
             if getattr(state, field) is None:

@@ -59,6 +59,9 @@ class TfiacClimate(TfiacEntity, ClimateEntity):
     _attr_temperature_unit = UnitOfTemperature.FAHRENHEIT
     _attr_min_temp = MIN_TEMP
     _attr_max_temp = MAX_TEMP
+    # Unknown hardware increment: Degree_Half is only a decoded status flag.
+    # Omitting a step is intentional, not an assertion of 1 °F or 0.5 °C support.
+    _attr_target_temperature_step = None
     _attr_fan_modes = list(FAN_MAP)
     _attr_hvac_modes = [HVACMode.OFF, *HVAC_MAP]
     _attr_swing_modes = list(SWING_MAP)

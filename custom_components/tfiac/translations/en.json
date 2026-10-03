@@ -32,7 +32,7 @@
     "step": {
       "init": {
         "title": "Optional controls",
-        "description": "Keep Disabled until tested on your model. Command fields for Eco, Turbo, Panel light and Beep feedback were tested on the maintainer's Livingroom AC, not all firmware or mode combinations. After opting in, enable individual switch entities for hardware testing. Changing this option reloads the integration but sends no AC commands.",
+        "description": "Keep Disabled until tested on your model. Command fields for Eco, Turbo, Display and Beep were tested on the maintainer's Livingroom AC, not all firmware or mode combinations. After opting in, enable individual switch entities for hardware testing. Changing this option reloads the integration but sends no AC commands.",
         "data": {
           "command_profile": "Optional command profile"
         }
@@ -51,8 +51,8 @@
     "switch": {
       "eco": {"name": "Eco"},
       "turbo": {"name": "Turbo"},
-      "display": {"name": "Panel light"},
-      "beep": {"name": "Beep feedback"}
+      "display": {"name": "Display"},
+      "beep": {"name": "Beep"}
     },
     "sensor": {
       "outdoor_temperature": {

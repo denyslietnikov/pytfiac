@@ -7,13 +7,211 @@ from xml.etree import ElementTree as ET
 import pytest
 from homeassistant.config_entries import SOURCE_RECONFIGURE
 from homeassistant.data_entry_flow import FlowResultType
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util.unit_system import METRIC_SYSTEM, US_CUSTOMARY_SYSTEM
 
 from custom_components.tfiac.api import TfiacClient, TfiacTimeoutError
 from custom_components.tfiac.models import Fan
 
 pytestmark = pytest.mark.asyncio
+
+
+@pytest.mark.parametrize(
+    "units,requested,wire_temperature,display_temperature",
+    [
+        (METRIC_SYSTEM, 26, 78.8, 26),
+        (METRIC_SYSTEM, 23.3, 73.94, 23.3),
+        (METRIC_SYSTEM, 23.01, 73.42, 23),
+        (METRIC_SYSTEM, 26.12345678, 79.02, 26.1),
+        (METRIC_SYSTEM, 16.2, 61.16, 16.2),
+        (METRIC_SYSTEM, 31.1, 87.98, 31.1),
+        (METRIC_SYSTEM, (61 - 32) / 1.8, 61, 16.1),
+        (METRIC_SYSTEM, (88 - 32) / 1.8, 88, 31.1),
+        (US_CUSTOMARY_SYSTEM, 61, 61, 61),
+        (US_CUSTOMARY_SYSTEM, 88, 88, 88),
+        (US_CUSTOMARY_SYSTEM, 78.8, 78.8, 79),
+        (US_CUSTOMARY_SYSTEM, 79.022222204, 79.02, 79),
+    ],
+)
+async def test_temperature_round_trip_through_ha_and_real_client(
+    hass,
+    entry,
+    wire,
+    monkeypatch,
+    units,
+    requested,
+    wire_temperature,
+    display_temperature,
+):
+    monkeypatch.setattr(
+        "custom_components.tfiac.api.COMMAND_CONFIRMATION_TIMEOUT", 0.05
+    )
+    hass.config.units = units
+    wire.root.find("statusUpdateMsg/TurnOn").text = "on"
+    wire.root.find("statusUpdateMsg/BaseMode").text = "cool"
+    entity_id = await setup(hass, entry, wire)
+    await hass.services.async_call(
+        "climate",
+        "set_temperature",
+        {"entity_id": entity_id, "temperature": requested},
+        blocking=True,
+    )
+    assert wire.message_ids == ["SyncStatusReq", "SetMessage", "SyncStatusReq"]
+    payload = wire.requests[1].find("SetMessage")
+    assert payload.find("SetTemp").text == str(float(wire_temperature))
+    assert payload.find("TurnOn").text == "on"
+    assert payload.find("BaseMode").text == "cool"
+    assert payload.find("Degree_Half") is None
+    assert entry.runtime_data.data.target_temperature == wire_temperature
+    actual = hass.states.get(entity_id)
+    assert actual.state == "cool"
+    assert actual.attributes["temperature"] == display_temperature
+
+
+@pytest.mark.parametrize("units", [METRIC_SYSTEM, US_CUSTOMARY_SYSTEM])
+@pytest.mark.parametrize("degree_half", ["on", "off", None])
+async def test_native_range_and_unknown_step_are_not_inferred(
+    hass, entry, wire, units, degree_half
+):
+    hass.config.units = units
+    node = wire.root.find("statusUpdateMsg/Degree_Half")
+    if degree_half is None:
+        wire.root.find("statusUpdateMsg").remove(node)
+    else:
+        node.text = degree_half
+    entity_id = await setup(hass, entry, wire)
+    entity = hass.data["climate"].get_entity(entity_id)
+    assert entity.temperature_unit == "°F"
+    assert entity.min_temp == 61
+    assert entity.max_temp == 88
+    assert entity.target_temperature_step is None
+    actual = hass.states.get(entity_id)
+    assert "target_temp_step" not in actual.attributes
+    assert actual.attributes["min_temp"] == (16.1 if units == METRIC_SYSTEM else 61)
+    assert actual.attributes["max_temp"] == (31.1 if units == METRIC_SYSTEM else 88)
+    assert wire.requests == []
+
+
+@pytest.mark.parametrize(
+    "units,requested",
+    [
+        (METRIC_SYSTEM, 16.1),
+        (METRIC_SYSTEM, 31.2),
+        (US_CUSTOMARY_SYSTEM, 60.9999),
+        (US_CUSTOMARY_SYSTEM, 88.0001),
+    ],
+)
+async def test_ha_rejects_outside_native_range_before_network(
+    hass, entry, wire, units, requested
+):
+    hass.config.units = units
+    entity_id = await setup(hass, entry, wire)
+    previous = entry.runtime_data.data
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            "climate",
+            "set_temperature",
+            {"entity_id": entity_id, "temperature": requested},
+            blocking=True,
+        )
+    assert wire.requests == []
+    assert entry.runtime_data.data is previous
+    assert entry.runtime_data.last_update_success
+
+
+@pytest.mark.parametrize("requested", [float("nan"), float("inf"), float("-inf")])
+async def test_nonfinite_temperature_never_writes(hass, entry, wire, requested):
+    entity_id = await setup(hass, entry, wire)
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            "climate",
+            "set_temperature",
+            {"entity_id": entity_id, "temperature": requested},
+            blocking=True,
+        )
+    assert "SetMessage" not in wire.message_ids
+    assert entry.runtime_data.data.target_temperature == 77
+    assert entry.runtime_data.last_update_success
+
+
+async def test_metric_rounding_noop_does_not_power_on(hass, entry, wire):
+    hass.config.units = METRIC_SYSTEM
+    wire.root.find("statusUpdateMsg/TurnOn").text = "off"
+    entity_id = await setup(hass, entry, wire)
+    await hass.services.async_call(
+        "climate",
+        "set_temperature",
+        {"entity_id": entity_id, "temperature": 25.00000001},
+        blocking=True,
+    )
+    assert wire.message_ids == ["SyncStatusReq"]
+    assert hass.states.get(entity_id).state == "off"
+    assert hass.states.get(entity_id).attributes["temperature"] == 25
+
+
+async def test_metric_setpoint_without_mode_does_not_power_on(hass, entry, wire):
+    hass.config.units = METRIC_SYSTEM
+    wire.root.find("statusUpdateMsg/TurnOn").text = "off"
+    entity_id = await setup(hass, entry, wire)
+    await hass.services.async_call(
+        "climate",
+        "set_temperature",
+        {"entity_id": entity_id, "temperature": 26},
+        blocking=True,
+    )
+    assert wire.message_ids == ["SyncStatusReq", "SetMessage", "SyncStatusReq"]
+    assert wire.requests[1].find("SetMessage/TurnOn").text == "off"
+    assert wire.requests[1].find("SetMessage/SetTemp").text == "78.8"
+    assert hass.states.get(entity_id).state == "off"
+
+
+async def test_metric_setpoint_and_mode_use_one_transaction(hass, entry, wire):
+    hass.config.units = METRIC_SYSTEM
+    entity_id = await setup(hass, entry, wire)
+    await hass.services.async_call(
+        "climate",
+        "set_temperature",
+        {"entity_id": entity_id, "temperature": 23.01, "hvac_mode": "cool"},
+        blocking=True,
+    )
+    assert wire.message_ids == ["SyncStatusReq", "SetMessage", "SyncStatusReq"]
+    payload = wire.requests[1].find("SetMessage")
+    assert payload.find("SetTemp").text == "73.42"
+    assert payload.find("TurnOn").text == "on"
+    assert payload.find("BaseMode").text == "cool"
+    assert hass.states.get(entity_id).state == "cool"
+    assert hass.states.get(entity_id).attributes["temperature"] == 23
+
+
+async def test_unverified_hardware_rounding_is_not_false_confirmation(
+    hass, entry, wire, monkeypatch
+):
+    monkeypatch.setattr(
+        "custom_components.tfiac.api.COMMAND_CONFIRMATION_TIMEOUT", 0.05
+    )
+    hass.config.units = METRIC_SYSTEM
+    entity_id = await setup(hass, entry, wire)
+    send = wire.send
+
+    async def rounded_device(message):
+        response = await send(message)
+        if ET.fromstring(message).get("msgid") == "SetMessage":
+            wire.root.find("statusUpdateMsg/SetTemp").text = "79"
+        return response
+
+    entry.runtime_data.client._send = rounded_device
+    with pytest.raises(HomeAssistantError, match="did not confirm"):
+        await hass.services.async_call(
+            "climate",
+            "set_temperature",
+            {"entity_id": entity_id, "temperature": 26},
+            blocking=True,
+        )
+    assert wire.message_ids == ["SyncStatusReq", "SetMessage", "SyncStatusReq"]
+    assert entry.runtime_data.data.target_temperature == 79
+    assert hass.states.get(entity_id).attributes["temperature"] == 26.1
+    assert entry.runtime_data.last_update_success
 
 
 class XmlDevice:

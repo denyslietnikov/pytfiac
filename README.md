@@ -1,217 +1,67 @@
 # TFIAC for Home Assistant
 
-Custom Home Assistant integration for local control of air conditioners that use
-the TFIAC protocol and mobile app.
+Local control of TFIAC air conditioners in Home Assistant. No cloud account required.
 
-The `develop` branch contains the unpublished `0.7.0b1` development candidate.
-Its HA lifecycle and command transactions are covered by automated tests, but
-the new implementation has not yet been tested on real air conditioners.
+Requires **Home Assistant 2026.9.4+** and local network access to the AC (UDP 7777).
+`develop` contains the unpublished `0.7.0b1` candidate with limited hardware testing.
 
 ## Features
 
-- HVAC modes: Cool, Heat, Dry, Fan Only, and Auto
-- Fan-speed control
-- Independent horizontal and vertical swing controls, when reported by the device
-- Sleep mode as a climate preset
-- Experimental Eco, Turbo, Panel light, and Beep feedback switches (explicit opt-in)
+- Cool, Heat, Dry, Fan Only and Auto modes
+- Fan speed, independent vertical/horizontal swing and Sleep preset
 - Current and target temperature
-- Optional experimental outdoor-temperature sensor (disabled by default)
-- Privacy-safe diagnostics for reported capabilities and optional status issues
-- Local polling over UDP; no cloud account is required
+- Experimental Eco, Turbo, Display, Beep and outdoor temperature
+- Apple Home and Siri through [HomeKit Bridge](https://www.home-assistant.io/integrations/homekit/)
 
-## Requirements
+## Installation
 
-- Home Assistant 2026.9.4 or newer for the development candidate
-- The air conditioner and Home Assistant must be able to reach each other on the
-  local network over UDP port 7777
+### HACS
 
-## Installation with HACS
+1. Add `https://github.com/denyslietnikov/pytfiac` to **HACS → Custom repositories**
+   with category **Integration**.
+2. Install **TFIAC** and restart Home Assistant.
+3. Open **Settings → Devices & services → Add Integration → TFIAC** and enter the AC's IP.
 
-1. In Home Assistant, open **HACS > Integrations**.
-2. Open the menu and select **Custom repositories**.
-3. Add `https://github.com/denyslietnikov/pytfiac` with category
-   **Integration**.
-4. Find and install **TFIAC**.
-5. Restart Home Assistant.
-6. Open **Settings > Devices & services > Add Integration**, search for
-   **TFIAC**, and enter the air conditioner's IP address.
+HACS uses published releases. Install the unpublished development candidate manually.
 
-Stable versions are distributed as GitHub Releases. The default branch is hidden
-in HACS so that normal installations do not accidentally track development
-commits.
+### Manual
 
-## Manual installation
-
-Copy `custom_components/tfiac` into the `custom_components` directory of your
-Home Assistant configuration, restart Home Assistant, and add TFIAC from
-**Settings > Devices & services**.
-
-The protocol client is bundled inside the integration. Do not install the legacy
-`pytfiac` PyPI package for the Home Assistant integration.
+Copy `custom_components/tfiac` to your HA configuration's `custom_components`
+directory, restart HA and add TFIAC. No separate `pytfiac` package is needed.
 
 ## Usage
 
-The integration creates one climate entity. Sleep mode, when reported by the
-device, is available in its **Preset** selector as `sleep`; select `none` to
-disable it. Sleep and Turbo are
-not changed together by this integration until their interaction is confirmed
-on real devices.
+Use the climate entity for normal control. Select the `sleep` preset to enable
+Sleep, or `none` to disable it. **Reconfigure** changes the AC's IP address.
 
-Fan speeds use `auto`, `low`, `middle`, and `high`. Update existing automations
-that request `medium` to use `middle`. Turning the AC on preserves
-its reported operation instead of forcing Cool.
+For optional switches, select **Configure → Optional command profile →
+Experimental commands (model-specific)**, then enable individual entities on the
+device page. These switches and the outdoor sensor are disabled by default;
+test them on your model before using them in automations.
 
-Existing config entries, climate unique IDs, and device identifiers are retained.
-Use **Reconfigure** to update a device host; an old host override in options is
-removed while other options are preserved.
-
-To use the entity from an iPhone, expose it with Home Assistant's standard
-[HomeKit Bridge](https://www.home-assistant.io/integrations/homekit/) integration.
-
-### Swing migration in 0.7
-
-Swing uses two independent HA controls, each with `"off"` and `"on"` modes:
-
-- Vertical: `climate.set_swing_mode`, with `swing_mode`.
-- Horizontal: `climate.set_swing_horizontal_mode`, with `swing_horizontal_mode`.
-
-Only reported directions are exposed. Changing one direction preserves the
-other direction from a fresh device read, including changes made with a remote.
-
-This is a breaking change from the old combined swing selector. Values
-`horizontal`, `vertical`, and `both` are no longer accepted by `set_swing_mode`.
-Existing `off` calls now disable **vertical only**, not both directions. Update
-automations to set both directions explicitly where they previously set a
-combined mode:
-
-| Old combined mode | Vertical `swing_mode` | Horizontal `swing_horizontal_mode` |
-| --- | --- | --- |
-| `off` | `"off"` | `"off"` |
-| `horizontal` | `"off"` | `"on"` |
-| `vertical` | `"on"` | `"off"` |
-| `both` | `"on"` | `"on"` |
-
-For example, enable both directions in an automation/script action sequence:
-
-```yaml
-- action: climate.set_swing_mode
-  target:
-    entity_id: climate.your_ac
-  data:
-    swing_mode: "on"
-- action: climate.set_swing_horizontal_mode
-  target:
-    entity_id: climate.your_ac
-  data:
-    swing_horizontal_mode: "on"
-```
-
-Keep `"on"`/`"off"` quoted in YAML. These are two serialized device transactions,
-not one atomic combined command. Entity IDs and config entries do not change.
-
-### Optional status and outdoor temperature
-
-Eco, Turbo, Display, Beep, and `Degree_Half` are decoded when their status fields
-are reported. Diagnostics include these decoded states even with controls disabled.
-Status support does not prove that a similarly named command field is writable.
-Conflicting aliases or invalid optional values are reported without making the
-main climate entity unavailable.
-
-An **Outdoor temperature** sensor is registered only when the first refresh has
-a finite, nonzero `OutdoorTemp`. It is disabled by default because this field's
-unit and sentinel semantics still need device validation. The implementation
-currently uses the integration's legacy Fahrenheit assumption; HA converts it to
-your selected temperature unit. Do not rely on it for automations until verified
-on your model.
-
-`OutdoorTemp=0` is conservatively treated as unknown, not a confirmed measurement.
-If the field first becomes usable later, reload the integration to create the
-sensor. After creation, missing/invalid/zero values become `unknown`; communication
-failure makes it `unavailable`. The sensor shares the climate coordinator and
-does not open an extra device connection.
-
-### Experimental optional controls
-
-Normal installations keep **Optional command profile: Disabled** until tested on
-their model. **Configure** on the TFIAC integration offers an explicit
-**Experimental commands (model-specific)** profile. Selecting it reloads the
-integration with a status read, but sends no write commands.
-
-The profile creates **Eco**, **Turbo**, **Panel light**, and **Beep feedback**
-switches only for usable initial statuses. Each switch is also disabled by default;
-enable individual entities on the device page only when ready to test them.
-Missing/conflicting/invalid initial flags create no switch; reload if the field
-becomes usable later. Existing switches show `unknown` for unusable statuses and
-`unavailable` for communication errors. Disabling the profile unloads these
-controls; their registry IDs remain for a later opt-in.
-
-This profile is an explicit wire contract, not automatic firmware detection:
-
-| Switch | Read status | Command field |
-|---|---|---|
-| Eco | `Opt_ECO` / `Opt_eco` | `Opt_ECO` |
-| Turbo | `Opt_super` | `Opt_super` |
-| Panel light | `Opt_display` | `Opt_display` |
-| Beep feedback | `BeepEnable` / `Opt_beep` | `BeepEnable` |
-
-These `on/off` commands were tested on the maintainer's Livingroom AC while
-running in Cool on 3 October 2026. Panel light and beep changes were also
-physically observed. The old writer spellings `Opt_eco` and `Opt_beep` were
-ignored by that device. Beep feedback is a persistent setting, not a one-shot
-beep button. Other models, firmware, mode combinations and persistence across
-power cycles remain unverified. A reported status field alone never enables writes.
-
-Each action uses the shared read/write/confirmation transaction: fresh power, operation,
-temperature, fan and existing Sleep profile plus **one requested optional flag**.
-Unrelated optional flags, swing, `Degree_Half`, and unknown firmware fields are
-not echoed into the command. It does not force power on, reset another mode, or
-invent Sleep/Eco/Turbo exclusion rules. After one write, read-only status requests
-wait up to 25 seconds, one second apart, for the requested controls to match.
-The transaction lock remains held so another command cannot overwrite a pending
-change. Only device-read state is published; an ACK does not prove application
-and writes are never retried automatically.
-
-If the device keeps responding without confirming the change, HA reports an
-action error and publishes the latest actual status without marking the AC
-unavailable. Communication failure still makes entities unavailable. Test
-setpoints and optional flags while the AC is running: the Livingroom device
-ignored setpoint changes in standby/Fan-only. The integration does not
-automatically power on to apply them.
-
-Confirmation checks only requested controls (including implicit power-on when
-selecting a mode), not the ambient temperature sensor or unrelated settings.
-Sleep is compared as enabled/disabled because firmware may shorten its profile.
-Observed fan changes are published, not forced to a guessed value.
-
-Sleep retains its existing climate preset; Eco and Turbo are deliberately not
-additional presets until mutual exclusion is verified. Do not rely on these
-experimental controls for automations before validation on your model.
-
-### Diagnostics
-
-Use the integration's **Download diagnostics** action in **Settings > Devices &
-services** when reporting a problem. Diagnostics use the existing snapshot and
-do not send AC commands. Host/IP, device name, all stored configuration values,
-and arbitrary firmware values are omitted or redacted. Reported field names,
-decoded statuses, capabilities, optional parse issues, and explicit protocol
-assumptions (including the active optional command contract) are included. Review
-the complete HA-generated report before sharing.
+Temperatures follow your HA unit settings. The current range is `61–88 °F`;
+for tenth-degree Celsius requests, use `16.2–31.1 °C`. Hardware limits and steps
+still need model-specific validation. Setting temperature alone does not turn
+the AC on; test optional controls while it is running. Confirmation may take
+up to 25 seconds.
 
 ## Updating and rollback
 
-Back up the Home Assistant configuration before updating. After an update, restart
-Home Assistant and verify power, mode, temperature, fan, swing, and Sleep controls.
+Back up HA before updating. Existing entity/device IDs are retained.
+Fan automations using `medium` must change to `middle`.
 
-To roll back, restore the Home Assistant backup or, if the previous stable version
-is available in HACS, use **Redownload** and restart Home Assistant. If you changed
-swing automations for 0.7, restore their earlier versions when returning to the
-old combined swing model.
+### Swing migration in 0.7
 
-Development plans, local test commands, and release criteria are documented in
-[ROADMAP.md](ROADMAP.md).
+Vertical and horizontal swing now have separate `off/on` controls.
+The old `horizontal/vertical/both` values are no longer accepted; vertical
+`off` does not disable horizontal swing.
+See [migration examples](ROADMAP.md#swing-migration-in-07).
+
+To roll back, restore your HA backup or redownload an available earlier release
+in HACS and restart. Also revert changed fan/swing automations.
 
 ## Support
 
-Report reproducible problems in
-[GitHub Issues](https://github.com/denyslietnikov/pytfiac/issues). Include the
-integration version, Home Assistant version, relevant logs, and the device model.
+Open a [GitHub issue](https://github.com/denyslietnikov/pytfiac/issues) with your
+HA/integration versions, AC model, logs and **Download diagnostics** report.
+Review diagnostics before sharing.

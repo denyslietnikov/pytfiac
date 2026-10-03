@@ -10,6 +10,7 @@ from xml.etree import ElementTree as ET
 
 from .models import (
     OPTIONAL_CONTROL_FIELDS,
+    TEMPERATURE_DECIMAL_PLACES,
     CommandProfile,
     Fan,
     Operation,
@@ -141,7 +142,7 @@ def parse_status(response: bytes) -> TfiacState:
             return None
         # The supplied sample has 0, which may be a sentinel. Do not fabricate a
         # measurement (or treat it as confirmed 0 °F) before hardware validation.
-        value = round(value, 2)
+        value = round(value, TEMPERATURE_DECIMAL_PLACES)
         if value == 0:
             optional_issues.append("OutdoorTemp:ambiguous_zero")
             return None
@@ -151,7 +152,7 @@ def parse_status(response: bytes) -> TfiacState:
         value = float(fields[field])
         if not isfinite(value):
             raise ValueError("Temperature is not finite")
-        return round(value, 2)
+        return round(value, TEMPERATURE_DECIMAL_PLACES)
 
     def direction(field: str) -> bool | None:
         if field not in fields:
