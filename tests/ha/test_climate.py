@@ -41,8 +41,13 @@ async def setup(hass, entry):
         ("set_fan_mode", {"fan_mode": "middle"}, TfiacChanges(fan=Fan.MIDDLE)),
         (
             "set_swing_mode",
-            {"swing_mode": "both"},
-            TfiacChanges(swing_horizontal=True, swing_vertical=True),
+            {"swing_mode": "on"},
+            TfiacChanges(swing_vertical=True),
+        ),
+        (
+            "set_swing_horizontal_mode",
+            {"swing_horizontal_mode": "on"},
+            TfiacChanges(swing_horizontal=True),
         ),
         ("set_preset_mode", {"preset_mode": "sleep"}, TfiacChanges(sleep=True)),
         ("turn_on", {}, TfiacChanges(power=Power.ON)),
@@ -113,6 +118,7 @@ async def test_optional_features(hass, entry, client, ha_state):
     attrs = hass.states.get(entity_id).attributes
     assert not attrs["supported_features"] & ClimateEntityFeature.PRESET_MODE
     assert not attrs["supported_features"] & ClimateEntityFeature.SWING_MODE
+    assert not attrs["supported_features"] & ClimateEntityFeature.SWING_HORIZONTAL_MODE
     assert attrs["current_temperature"] is None
 
 
@@ -149,5 +155,68 @@ async def test_invalid_fan_is_rejected_before_device_write(hass, entry, client):
             "set_fan_mode",
             {"entity_id": entity_id, "fan_mode": "medium"},
             blocking=True,
+        )
+    client.async_apply_changes.assert_not_awaited()
+
+
+@pytest.mark.parametrize("horizontal", [None, False, True])
+@pytest.mark.parametrize("vertical", [None, False, True])
+async def test_swing_capabilities_and_state_per_axis(
+    hass, entry, client, ha_state, horizontal, vertical
+):
+    client.async_update.return_value = replace(
+        ha_state, swing_horizontal=horizontal, swing_vertical=vertical
+    )
+    entity_id = await setup(hass, entry)
+    attrs = hass.states.get(entity_id).attributes
+    features = attrs["supported_features"]
+    for value, feature, mode_attr, modes_attr in (
+        (vertical, ClimateEntityFeature.SWING_MODE, "swing_mode", "swing_modes"),
+        (
+            horizontal,
+            ClimateEntityFeature.SWING_HORIZONTAL_MODE,
+            "swing_horizontal_mode",
+            "swing_horizontal_modes",
+        ),
+    ):
+        assert bool(features & feature) is (value is not None)
+        if value is None:
+            assert mode_attr not in attrs
+            assert modes_attr not in attrs
+        else:
+            assert attrs[mode_attr] == ("on" if value else "off")
+            assert attrs[modes_attr] == ["off", "on"]
+
+
+@pytest.mark.parametrize("legacy_mode", ["horizontal", "vertical", "both"])
+async def test_legacy_swing_mode_rejected_before_write(
+    hass, entry, client, legacy_mode
+):
+    entity_id = await setup(hass, entry)
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            "climate",
+            "set_swing_mode",
+            {"entity_id": entity_id, "swing_mode": legacy_mode},
+            blocking=True,
+        )
+    client.async_apply_changes.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "service,attribute,missing_field",
+    [
+        ("set_swing_mode", "swing_mode", "swing_vertical"),
+        ("set_swing_horizontal_mode", "swing_horizontal_mode", "swing_horizontal"),
+    ],
+)
+async def test_missing_swing_axis_rejected_before_write(
+    hass, entry, client, ha_state, service, attribute, missing_field
+):
+    client.async_update.return_value = replace(ha_state, **{missing_field: None})
+    entity_id = await setup(hass, entry)
+    with pytest.raises(HomeAssistantError):
+        await hass.services.async_call(
+            "climate", service, {"entity_id": entity_id, attribute: "on"}, blocking=True
         )
     client.async_apply_changes.assert_not_awaited()

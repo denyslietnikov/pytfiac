@@ -10,10 +10,8 @@ from homeassistant.components.climate import (
     FAN_MIDDLE,
     PRESET_NONE,
     PRESET_SLEEP,
-    SWING_BOTH,
-    SWING_HORIZONTAL,
     SWING_OFF,
-    SWING_VERTICAL,
+    SWING_ON,
     ClimateEntity,
     ClimateEntityFeature,
     HVACMode,
@@ -42,12 +40,7 @@ FAN_MAP = {
     FAN_HIGH: Fan.HIGH,
 }
 FAN_MAP_REV = {value: key for key, value in FAN_MAP.items()}
-SWING_MAP = {
-    SWING_OFF: (False, False),
-    SWING_HORIZONTAL: (True, False),
-    SWING_VERTICAL: (False, True),
-    SWING_BOTH: (True, True),
-}
+SWING_MAP = {SWING_OFF: False, SWING_ON: True}
 SWING_MAP_REV = {value: key for key, value in SWING_MAP.items()}
 
 
@@ -69,6 +62,7 @@ class TfiacClimate(TfiacEntity, ClimateEntity):
     _attr_fan_modes = list(FAN_MAP)
     _attr_hvac_modes = [HVACMode.OFF, *HVAC_MAP]
     _attr_swing_modes = list(SWING_MAP)
+    _attr_swing_horizontal_modes = list(SWING_MAP)
     _attr_preset_modes = [PRESET_NONE, PRESET_SLEEP]
 
     def __init__(self, coordinator: TfiacCoordinator) -> None:
@@ -82,8 +76,10 @@ class TfiacClimate(TfiacEntity, ClimateEntity):
         state = coordinator.data
         if state.sleep is not None:
             features |= ClimateEntityFeature.PRESET_MODE
-        if state.swing_horizontal is not None and state.swing_vertical is not None:
+        if state.swing_vertical is not None:
             features |= ClimateEntityFeature.SWING_MODE
+        if state.swing_horizontal is not None:
+            features |= ClimateEntityFeature.SWING_HORIZONTAL_MODE
         self._attr_supported_features = features
 
     @property
@@ -107,8 +103,11 @@ class TfiacClimate(TfiacEntity, ClimateEntity):
 
     @property
     def swing_mode(self) -> str | None:
-        state = self.coordinator.data
-        return SWING_MAP_REV.get((state.swing_horizontal, state.swing_vertical))
+        return SWING_MAP_REV.get(self.coordinator.data.swing_vertical)
+
+    @property
+    def swing_horizontal_mode(self) -> str | None:
+        return SWING_MAP_REV.get(self.coordinator.data.swing_horizontal)
 
     @property
     def preset_mode(self) -> str | None:
@@ -150,12 +149,23 @@ class TfiacClimate(TfiacEntity, ClimateEntity):
         await self.coordinator.async_apply_changes(TfiacChanges(fan=fan))
 
     async def async_set_swing_mode(self, swing_mode: str) -> None:
+        """Change vertical swing without changing the fresh horizontal state."""
         try:
-            horizontal, vertical = SWING_MAP[swing_mode]
+            vertical = SWING_MAP[swing_mode]
         except KeyError as err:
-            raise ServiceValidationError("Unsupported swing mode") from err
+            raise ServiceValidationError("Unsupported vertical swing mode") from err
         await self.coordinator.async_apply_changes(
-            TfiacChanges(swing_horizontal=horizontal, swing_vertical=vertical)
+            TfiacChanges(swing_vertical=vertical)
+        )
+
+    async def async_set_swing_horizontal_mode(self, swing_horizontal_mode: str) -> None:
+        """Change horizontal swing without changing the fresh vertical state."""
+        try:
+            horizontal = SWING_MAP[swing_horizontal_mode]
+        except KeyError as err:
+            raise ServiceValidationError("Unsupported horizontal swing mode") from err
+        await self.coordinator.async_apply_changes(
+            TfiacChanges(swing_horizontal=horizontal)
         )
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:

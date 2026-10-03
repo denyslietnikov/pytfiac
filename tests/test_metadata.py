@@ -18,7 +18,7 @@ def test_manifest_is_development_candidate() -> None:
     manifest = load_json("custom_components/tfiac/manifest.json")
 
     assert manifest["domain"] == "tfiac"
-    assert manifest["version"] == "0.6.0b1"
+    assert manifest["version"] == "0.7.0b1"
     assert manifest["codeowners"] == ["@denyslietnikov"]
     assert manifest["documentation"].startswith("https://github.com/")
     assert manifest["issue_tracker"].endswith("/issues")

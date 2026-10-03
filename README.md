@@ -3,7 +3,7 @@
 Custom Home Assistant integration for local control of air conditioners that use
 the TFIAC protocol and mobile app.
 
-The `develop` branch contains the unpublished `0.6.0b1` development candidate.
+The `develop` branch contains the unpublished `0.7.0b1` development candidate.
 Its HA lifecycle and command transactions are covered by automated tests, but
 the new implementation has not yet been tested on real air conditioners.
 
@@ -11,14 +11,14 @@ the new implementation has not yet been tested on real air conditioners.
 
 - HVAC modes: Cool, Heat, Dry, Fan Only, and Auto
 - Fan-speed control
-- Horizontal, vertical, and combined swing modes
+- Independent horizontal and vertical swing controls, when reported by the device
 - Sleep mode as a climate preset
 - Current and target temperature
 - Local polling over UDP; no cloud account is required
 
 ## Requirements
 
-- Home Assistant 2026.9.4 or newer for the `0.6` development candidate
+- Home Assistant 2026.9.4 or newer for the development candidate
 - The air conditioner and Home Assistant must be able to reach each other on the
   local network over UDP port 7777
 
@@ -65,13 +65,56 @@ removed while other options are preserved.
 To use the entity from an iPhone, expose it with Home Assistant's standard
 [HomeKit Bridge](https://www.home-assistant.io/integrations/homekit/) integration.
 
+### Swing migration in 0.7
+
+Swing uses two independent HA controls, each with `"off"` and `"on"` modes:
+
+- Vertical: `climate.set_swing_mode`, with `swing_mode`.
+- Horizontal: `climate.set_swing_horizontal_mode`, with `swing_horizontal_mode`.
+
+Only reported directions are exposed. Changing one direction preserves the
+other direction from a fresh device read, including changes made with a remote.
+
+This is a breaking change from the old combined swing selector. Values
+`horizontal`, `vertical`, and `both` are no longer accepted by `set_swing_mode`.
+Existing `off` calls now disable **vertical only**, not both directions. Update
+automations to set both directions explicitly where they previously set a
+combined mode:
+
+| Old combined mode | Vertical `swing_mode` | Horizontal `swing_horizontal_mode` |
+| --- | --- | --- |
+| `off` | `"off"` | `"off"` |
+| `horizontal` | `"off"` | `"on"` |
+| `vertical` | `"on"` | `"off"` |
+| `both` | `"on"` | `"on"` |
+
+For example, enable both directions in an automation/script action sequence:
+
+```yaml
+- action: climate.set_swing_mode
+  target:
+    entity_id: climate.your_ac
+  data:
+    swing_mode: "on"
+- action: climate.set_swing_horizontal_mode
+  target:
+    entity_id: climate.your_ac
+  data:
+    swing_horizontal_mode: "on"
+```
+
+Keep `"on"`/`"off"` quoted in YAML. These are two serialized device transactions,
+not one atomic combined command. Entity IDs and config entries do not change.
+
 ## Updating and rollback
 
 Back up the Home Assistant configuration before updating. After an update, restart
 Home Assistant and verify power, mode, temperature, fan, swing, and Sleep controls.
 
-To roll back, open TFIAC in HACS, select **Redownload**, choose the previous stable
-version, and restart Home Assistant.
+To roll back, restore the Home Assistant backup or, if the previous stable version
+is available in HACS, use **Redownload** and restart Home Assistant. If you changed
+swing automations for 0.7, restore their earlier versions when returning to the
+old combined swing model.
 
 Development plans, local test commands, and release criteria are documented in
 [ROADMAP.md](ROADMAP.md).

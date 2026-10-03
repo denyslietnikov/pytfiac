@@ -95,9 +95,19 @@ async def setup(hass, entry, wire):
         ("set_fan_mode", {"fan_mode": "middle"}, "fan_mode", "middle"),
         ("set_fan_mode", {"fan_mode": "high"}, "fan_mode", "high"),
         ("set_swing_mode", {"swing_mode": "off"}, "swing_mode", "off"),
-        ("set_swing_mode", {"swing_mode": "horizontal"}, "swing_mode", "horizontal"),
-        ("set_swing_mode", {"swing_mode": "vertical"}, "swing_mode", "vertical"),
-        ("set_swing_mode", {"swing_mode": "both"}, "swing_mode", "both"),
+        ("set_swing_mode", {"swing_mode": "on"}, "swing_mode", "on"),
+        (
+            "set_swing_horizontal_mode",
+            {"swing_horizontal_mode": "off"},
+            "swing_horizontal_mode",
+            "off",
+        ),
+        (
+            "set_swing_horizontal_mode",
+            {"swing_horizontal_mode": "on"},
+            "swing_horizontal_mode",
+            "on",
+        ),
         ("set_preset_mode", {"preset_mode": "sleep"}, "preset_mode", "sleep"),
         ("set_preset_mode", {"preset_mode": "none"}, "preset_mode", "none"),
         ("turn_on", {}, "state", "auto"),
@@ -128,6 +138,74 @@ async def test_controls_read_back_real_snapshot(
     )
     if service == "set_temperature":
         assert state.attributes["temperature"] == 78
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("horizontal", [False, True])
+async def test_swing_preserves_fresh_other_axis(hass, entry, wire, horizontal, enabled):
+    field = "WindDirection_H" if horizontal else "WindDirection_V"
+    other = "WindDirection_V" if horizontal else "WindDirection_H"
+    service = "set_swing_horizontal_mode" if horizontal else "set_swing_mode"
+    attribute = "swing_horizontal_mode" if horizontal else "swing_mode"
+    other_attribute = "swing_mode" if horizontal else "swing_horizontal_mode"
+    mode = "on" if enabled else "off"
+    # Start with the opposite value so this command must write.
+    wire.root.find(f"statusUpdateMsg/{field}").text = "off" if enabled else "on"
+    entity_id = await setup(hass, entry, wire)
+    assert hass.states.get(entity_id).attributes[other_attribute] == "off"
+    # Simulate a physical remote change after the last coordinator poll.
+    wire.root.find(f"statusUpdateMsg/{other}").text = "on"
+    await hass.services.async_call(
+        "climate", service, {"entity_id": entity_id, attribute: mode}, blocking=True
+    )
+    assert wire.message_ids == ["SyncStatusReq", "SetMessage", "SyncStatusReq"]
+    payload = wire.requests[1].find("SetMessage")
+    assert {node.tag: node.text for node in payload} == {field: mode, other: "on"}
+    attrs = hass.states.get(entity_id).attributes
+    assert attrs[attribute] == mode
+    assert attrs[other_attribute] == "on"
+
+
+async def test_concurrent_swing_services_preserve_both_changes(hass, entry, wire):
+    entity_id = await setup(hass, entry, wire)
+    await asyncio.wait_for(
+        asyncio.gather(
+            hass.services.async_call(
+                "climate",
+                "set_swing_mode",
+                {"entity_id": entity_id, "swing_mode": "on"},
+                blocking=True,
+            ),
+            hass.services.async_call(
+                "climate",
+                "set_swing_horizontal_mode",
+                {"entity_id": entity_id, "swing_horizontal_mode": "on"},
+                blocking=True,
+            ),
+        ),
+        timeout=1,
+    )
+    attrs = hass.states.get(entity_id).attributes
+    assert attrs["swing_mode"] == "on"
+    assert attrs["swing_horizontal_mode"] == "on"
+    assert wire.message_ids == ["SyncStatusReq", "SetMessage", "SyncStatusReq"] * 2
+
+
+@pytest.mark.parametrize("horizontal", [False, True])
+async def test_swing_payload_omits_unreported_axis(hass, entry, wire, horizontal):
+    field = "WindDirection_H" if horizontal else "WindDirection_V"
+    other = "WindDirection_V" if horizontal else "WindDirection_H"
+    service = "set_swing_horizontal_mode" if horizontal else "set_swing_mode"
+    attribute = "swing_horizontal_mode" if horizontal else "swing_mode"
+    status = wire.root.find("statusUpdateMsg")
+    status.remove(status.find(other))
+    entity_id = await setup(hass, entry, wire)
+    await hass.services.async_call(
+        "climate", service, {"entity_id": entity_id, attribute: "on"}, blocking=True
+    )
+    payload = wire.requests[1].find("SetMessage")
+    assert {node.tag: node.text for node in payload} == {field: "on"}
+    assert hass.states.get(entity_id).attributes[attribute] == "on"
 
 
 async def test_concurrent_services_and_polling(hass, entry, wire):
