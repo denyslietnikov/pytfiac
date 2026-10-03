@@ -46,16 +46,21 @@ def test_atomic_concurrent_commands(protocol, status_response):
     asyncio.run(scenario())
 
 
-def test_result_is_device_read_not_desired_state(protocol, status_response):
+def test_unapplied_command_reports_last_device_state(
+    protocol, status_response, monkeypatch
+):
+    monkeypatch.setattr(protocol.api, "COMMAND_CONFIRMATION_TIMEOUT", 0.05)
+
     async def scenario():
         client = protocol.api.TfiacClient("192.0.2.1")
         client._send = AsyncMock(
             side_effect=[status_response, b"<msg><SetMessage /></msg>", status_response]
         )
-        result = await client.async_apply_changes(
-            protocol.models.TfiacChanges(target_temperature=78)
-        )
-        assert result.target_temperature == 77
+        with pytest.raises(protocol.api.TfiacCommandNotConfirmedError) as error:
+            await client.async_apply_changes(
+                protocol.models.TfiacChanges(target_temperature=78)
+            )
+        assert error.value.last_state.target_temperature == 77
         assert client._send.await_count == 3
 
     asyncio.run(scenario())

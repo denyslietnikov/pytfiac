@@ -266,17 +266,81 @@ async def test_failed_post_write_read_keeps_previous_snapshot(hass, entry, wire)
     assert hass.states.get(entity_id).attributes["temperature"] == 78
 
 
-async def test_ack_does_not_publish_unapplied_change(hass, entry, wire):
+async def test_ack_does_not_publish_unapplied_change(hass, entry, wire, monkeypatch):
+    monkeypatch.setattr(
+        "custom_components.tfiac.api.COMMAND_CONFIRMATION_TIMEOUT", 0.05
+    )
     entity_id = await setup(hass, entry, wire)
     wire.apply_writes = False
-    await hass.services.async_call(
-        "climate",
-        "set_temperature",
-        {"entity_id": entity_id, "temperature": 78},
-        blocking=True,
-    )
+    send = wire.send
+
+    async def ignored_command(message):
+        response = await send(message)
+        if ET.fromstring(message).get("msgid") == "SetMessage":
+            wire.root.find("statusUpdateMsg/WindSpeed").text = "High"
+        return response
+
+    entry.runtime_data.client._send = ignored_command
+    with pytest.raises(HomeAssistantError, match="did not confirm"):
+        await hass.services.async_call(
+            "climate",
+            "set_temperature",
+            {"entity_id": entity_id, "temperature": 78},
+            blocking=True,
+        )
     assert wire.message_ids == ["SyncStatusReq", "SetMessage", "SyncStatusReq"]
     assert hass.states.get(entity_id).attributes["temperature"] == 77
+    assert hass.states.get(entity_id).attributes["fan_mode"] == "high"
+    assert hass.states.get(entity_id).state != "unavailable"
+    assert entry.runtime_data.last_update_success
+
+
+@pytest.mark.parametrize("sleep", [False, True])
+async def test_service_waits_for_delayed_actual_state(
+    hass, entry, wire, monkeypatch, sleep
+):
+    monkeypatch.setattr("custom_components.tfiac.api.COMMAND_CONFIRMATION_INTERVAL", 0)
+    wire.root.find("statusUpdateMsg/WindSpeed").text = "Middle"
+    entity_id = await setup(hass, entry, wire)
+    before = ET.tostring(wire.root)
+    send = wire.send
+    remaining = 0
+
+    async def delayed_command(message):
+        nonlocal remaining
+        request = ET.fromstring(message)
+        response = await send(message)
+        if request.get("msgid") == "SetMessage":
+            remaining = 2
+            if sleep:
+                wire.root.find(
+                    "statusUpdateMsg/Opt_sleepMode"
+                ).text = "sleepMode1:0:0:0:0:0:0:0:0:0:0"
+                wire.root.find("statusUpdateMsg/WindSpeed").text = "Auto"
+            return response
+        if remaining:
+            remaining -= 1
+            # No desired snapshot is published while waiting.
+            assert hass.states.get(entity_id).attributes["temperature"] == 77
+            assert hass.states.get(entity_id).attributes["preset_mode"] == "none"
+            return before
+        return response
+
+    entry.runtime_data.client._send = delayed_command
+    await hass.services.async_call(
+        "climate",
+        "set_preset_mode" if sleep else "set_temperature",
+        {
+            "entity_id": entity_id,
+            **({"preset_mode": "sleep"} if sleep else {"temperature": 78}),
+        },
+        blocking=True,
+    )
+    assert wire.message_ids == ["SyncStatusReq", "SetMessage"] + ["SyncStatusReq"] * 3
+    actual = hass.states.get(entity_id)
+    assert actual.attributes["temperature"] == (77 if sleep else 78)
+    assert actual.attributes["preset_mode"] == ("sleep" if sleep else "none")
+    assert actual.attributes["fan_mode"] == ("auto" if sleep else "middle")
 
 
 async def test_device_rejection_is_not_retried(hass, entry, wire):

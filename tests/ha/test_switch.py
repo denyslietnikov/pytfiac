@@ -17,10 +17,10 @@ from custom_components.tfiac.models import CommandProfile
 
 pytestmark = pytest.mark.asyncio
 FIELDS = (
-    ("eco", "Opt_ECO", "Opt_eco"),
+    ("eco", "Opt_ECO", "Opt_ECO"),
     ("turbo", "Opt_super", "Opt_super"),
     ("display", "Opt_display", "Opt_display"),
-    ("beep", "BeepEnable", "Opt_beep"),
+    ("beep", "BeepEnable", "BeepEnable"),
 )
 
 
@@ -65,9 +65,11 @@ class OptionalDevice:
         if self.reject_write:
             return b'<msg msgid="UnknownCmd"><UnknownCmd /></msg>'
         if self.apply_writes:
-            aliases = {command: status for _, status, command in FIELDS}
             for field in request.find("SetMessage"):
-                self.set(aliases.get(field.tag, field.tag), field.text)
+                # Livingroom ignores these old writer spellings, rather than
+                # mapping every read alias into a writable command.
+                if field.tag not in ("Opt_eco", "Opt_beep"):
+                    self.set(field.tag, field.text)
         if self.fail_after_write:
             self.fail_read = True
         return b'<msg msgid="SetMessage"><SetMessage /></msg>'
@@ -223,14 +225,21 @@ async def test_status_loss_is_unknown_then_service_rejected_without_write(
 
 
 @pytest.mark.parametrize("failure", ["ack_only", "reject", "post_read"])
-async def test_no_optimism_or_retries_and_recovery(hass, entry, device, failure):
+async def test_no_optimism_or_retries_and_recovery(
+    hass, entry, device, failure, monkeypatch
+):
     entities = await setup(hass, entry, device, enable=True)
     if failure == "ack_only":
-        device.apply_writes = False
-        await hass.services.async_call(
-            "switch", "turn_on", {"entity_id": entities["eco"]}, blocking=True
+        monkeypatch.setattr(
+            "custom_components.tfiac.api.COMMAND_CONFIRMATION_TIMEOUT", 0.05
         )
+        device.apply_writes = False
+        with pytest.raises(HomeAssistantError, match="did not confirm"):
+            await hass.services.async_call(
+                "switch", "turn_on", {"entity_id": entities["eco"]}, blocking=True
+            )
         assert hass.states.get(entities["eco"]).state == "off"
+        assert entry.runtime_data.last_update_success
         assert device.message_ids == ["SyncStatusReq", "SetMessage", "SyncStatusReq"]
         return
     if failure == "reject":
@@ -333,10 +342,10 @@ async def test_options_auto_reload_no_writes_preserves_options_and_ids(
         "profile": "legacy_experimental",
         "hardware_validated": False,
         "command_fields": {
-            "eco": "Opt_eco",
+            "eco": "Opt_ECO",
             "turbo": "Opt_super",
             "display": "Opt_display",
-            "beep": "Opt_beep",
+            "beep": "BeepEnable",
         },
     }
     assert (

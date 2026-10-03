@@ -132,11 +132,10 @@ does not open an extra device connection.
 
 ### Experimental optional controls
 
-Normal installations keep **Optional command profile: Disabled**. For the future
-hardware test cycle, **Configure** on the TFIAC integration offers an explicit
-**Experimental legacy commands (unverified)** profile. Selecting it reloads the
-integration with a status read, but sends no write commands. No real-device test
-is required at this stage of development.
+Normal installations keep **Optional command profile: Disabled** until tested on
+their model. **Configure** on the TFIAC integration offers an explicit
+**Experimental commands (model-specific)** profile. Selecting it reloads the
+integration with a status read, but sends no write commands.
 
 The profile creates **Eco**, **Turbo**, **Panel light**, and **Beep feedback**
 switches only for usable initial statuses. Each switch is also disabled by default;
@@ -146,27 +145,43 @@ becomes usable later. Existing switches show `unknown` for unusable statuses and
 `unavailable` for communication errors. Disabling the profile unloads these
 controls; their registry IDs remain for a later opt-in.
 
-This profile is an explicit hypothesis, not automatic firmware detection:
+This profile is an explicit wire contract, not automatic firmware detection:
 
-| Switch | Read status | Assumed command field |
+| Switch | Read status | Command field |
 |---|---|---|
-| Eco | `Opt_ECO` / `Opt_eco` | `Opt_eco` |
+| Eco | `Opt_ECO` / `Opt_eco` | `Opt_ECO` |
 | Turbo | `Opt_super` | `Opt_super` |
 | Panel light | `Opt_display` | `Opt_display` |
-| Beep feedback | `BeepEnable` / `Opt_beep` | `Opt_beep` |
+| Beep feedback | `BeepEnable` / `Opt_beep` | `BeepEnable` |
 
-Command spellings come from the legacy Homebridge writer; the profile assumes
-`on/off` flags and **persistent** beep feedback, not a one-shot beep button. Their
-spelling, payload shape, persistence, and mode interactions still need hardware
-validation. A reported status field alone never enables writes.
+These `on/off` commands were tested on the maintainer's Livingroom AC while
+running in Cool on 3 October 2026. Panel light and beep changes were also
+physically observed. The old writer spellings `Opt_eco` and `Opt_beep` were
+ignored by that device. Beep feedback is a persistent setting, not a one-shot
+beep button. Other models, firmware, mode combinations and persistence across
+power cycles remain unverified. A reported status field alone never enables writes.
 
-Each action uses the shared read/write/read transaction: fresh power, operation,
+Each action uses the shared read/write/confirmation transaction: fresh power, operation,
 temperature, fan and existing Sleep profile plus **one requested optional flag**.
 Unrelated optional flags, swing, `Degree_Half`, and unknown firmware fields are
 not echoed into the command. It does not force power on, reset another mode, or
-invent Sleep/Eco/Turbo exclusion rules. The subsequent status read is the only
-source of the published result; an ACK does not prove the change was applied and
-writes are never retried automatically.
+invent Sleep/Eco/Turbo exclusion rules. After one write, read-only status requests
+wait up to 25 seconds, one second apart, for the requested controls to match.
+The transaction lock remains held so another command cannot overwrite a pending
+change. Only device-read state is published; an ACK does not prove application
+and writes are never retried automatically.
+
+If the device keeps responding without confirming the change, HA reports an
+action error and publishes the latest actual status without marking the AC
+unavailable. Communication failure still makes entities unavailable. Test
+setpoints and optional flags while the AC is running: the Livingroom device
+ignored setpoint changes in standby/Fan-only. The integration does not
+automatically power on to apply them.
+
+Confirmation checks only requested controls (including implicit power-on when
+selecting a mode), not the ambient temperature sensor or unrelated settings.
+Sleep is compared as enabled/disabled because firmware may shorten its profile.
+Observed fan changes are published, not forced to a guessed value.
 
 Sleep retains its existing climate preset; Eco and Turbo are deliberately not
 additional presets until mutual exclusion is verified. Do not rely on these

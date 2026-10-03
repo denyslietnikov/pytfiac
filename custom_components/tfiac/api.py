@@ -22,6 +22,8 @@ from .models import (
 UDP_PORT = 7777
 MAX_DATAGRAM_SIZE = 16384
 REQUEST_TIMEOUT = 5
+COMMAND_CONFIRMATION_TIMEOUT = 25
+COMMAND_CONFIRMATION_INTERVAL = 1
 KNOWN_STATUS_FIELDS = frozenset(
     {
         "TurnOn",
@@ -51,6 +53,17 @@ class TfiacError(Exception):
 
 class TfiacTimeoutError(TfiacError):
     """The device did not respond."""
+
+
+class TfiacCommandNotConfirmedError(TfiacError):
+    """The device responds, but does not report the requested change."""
+
+    def __init__(self, last_state: TfiacState) -> None:
+        super().__init__(
+            "Device did not confirm the requested change within "
+            f"{COMMAND_CONFIRMATION_TIMEOUT:g} seconds"
+        )
+        self.last_state = last_state
 
 
 class TfiacConnectionError(TfiacError):
@@ -268,8 +281,40 @@ class _ResponseProtocol(asyncio.DatagramProtocol):
             self.future.set_exception(TfiacConnectionError("UDP connection closed"))
 
 
+def _changes_confirmed(
+    state: TfiacState, desired: TfiacState, changes: TfiacChanges
+) -> bool:
+    """Compare requested controls, not unrelated sensors or hardware side effects."""
+    fields = (
+        "power",
+        "operation",
+        "target_temperature",
+        "fan",
+        "swing_horizontal",
+        "swing_vertical",
+        *OPTIONAL_CONTROL_FIELDS,
+    )
+    if any(
+        getattr(changes, field) is not None
+        and getattr(state, field) != getattr(desired, field)
+        for field in fields
+    ):
+        return False
+    # Selecting an operation implicitly powers on; matching the mode alone is not
+    # sufficient if the device is still off.
+    if changes.operation is not None and state.power != desired.power:
+        return False
+    if changes.sleep is not None:
+        if state.sleep is None:
+            return False
+        # Firmware can shorten the transmitted Sleep profile and change fan.
+        # Confirm the enabled/disabled meaning, never exact profile text.
+        return (state.sleep != "off") == changes.sleep
+    return True
+
+
 class TfiacClient:
-    """Serialize status reads and complete read/write/read transactions."""
+    """Serialize status reads and complete read/write/confirmation transactions."""
 
     def __init__(
         self, host: str, *, command_profile: CommandProfile = CommandProfile.DISABLED
@@ -315,6 +360,29 @@ class TfiacClient:
         async with self._lock:
             return await self._read_status()
 
+    async def _confirm_changes(
+        self, desired: TfiacState, changes: TfiacChanges
+    ) -> TfiacState:
+        """Wait with bounded read-only requests; caller keeps the transaction lock."""
+        last_state = None
+        reading = False
+        try:
+            async with asyncio.timeout(COMMAND_CONFIRMATION_TIMEOUT):
+                while True:
+                    reading = True
+                    state = await self._read_status()
+                    reading = False
+                    if _changes_confirmed(state, desired, changes):
+                        return state
+                    last_state = state
+                    await asyncio.sleep(COMMAND_CONFIRMATION_INTERVAL)
+        except TimeoutError as err:
+            if reading or last_state is None:
+                raise TfiacTimeoutError(
+                    "Device did not respond during command confirmation"
+                ) from err
+            raise TfiacCommandNotConfirmedError(last_state) from err
+
     async def async_apply_changes(self, changes: TfiacChanges) -> TfiacState:
         """Read, send once, then read confirmed state before releasing the lock."""
         swing = (
@@ -343,7 +411,7 @@ class TfiacClient:
         async with self._lock:
             current = await self._read_status()
             desired = apply_changes(current, changes)
-            if desired == current:
+            if _changes_confirmed(current, desired, changes):
                 return current
             builder: Callable[[TfiacState, str], bytes] = (
                 build_swing_message if swing else build_set_message
@@ -358,4 +426,4 @@ class TfiacClient:
             response = await self._send(message)
             # An acknowledgement is not evidence that the desired state was applied.
             _parse_xml(response)
-            return await self._read_status()
+            return await self._confirm_changes(desired, changes)

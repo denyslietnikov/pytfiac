@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
-from .api import TfiacClient, TfiacError
+from .api import TfiacClient, TfiacCommandNotConfirmedError, TfiacError
 from .const import DOMAIN
 from .models import TfiacChanges, TfiacState
 
@@ -45,6 +45,11 @@ class TfiacCoordinator(DataUpdateCoordinator[TfiacState]):
             state = await self.client.async_apply_changes(changes)
         except ValueError as err:
             raise ServiceValidationError(str(err)) from err
+        except TfiacCommandNotConfirmedError as err:
+            # A failed action is not a failed connection. Publish the last valid
+            # device read, keep entities available, and report failure to HA.
+            self.async_set_updated_data(err.last_state)
+            raise HomeAssistantError(f"TFIAC command failed: {err}") from err
         except TfiacError as err:
             self.async_set_update_error(UpdateFailed(str(err)))
             raise HomeAssistantError(f"TFIAC command failed: {err}") from err

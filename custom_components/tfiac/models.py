@@ -19,13 +19,13 @@ class CommandProfile(StrEnum):
 
     @property
     def command_fields(self) -> tuple[tuple[str, str], ...]:
-        """Unverified legacy spellings; hardware validation is still required."""
+        """Livingroom-tested spellings; other firmware still requires validation."""
         if self == self.LEGACY_EXPERIMENTAL:
             return (
-                ("eco", "Opt_eco"),
+                ("eco", "Opt_ECO"),
                 ("turbo", "Opt_super"),
                 ("display", "Opt_display"),
-                ("beep", "Opt_beep"),
+                ("beep", "BeepEnable"),
             )
         return ()
 

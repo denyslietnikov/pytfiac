@@ -8,10 +8,10 @@ from xml.etree import ElementTree as ET
 import pytest
 
 FIELDS = (
-    ("eco", "Opt_eco"),
+    ("eco", "Opt_ECO"),
     ("turbo", "Opt_super"),
     ("display", "Opt_display"),
-    ("beep", "Opt_beep"),
+    ("beep", "BeepEnable"),
 )
 
 
@@ -109,7 +109,9 @@ def test_optional_mixed_intent_rejected_before_io(protocol, extra):
 
 
 @pytest.mark.parametrize("field,tag", FIELDS)
-def test_optional_ack_is_not_status(protocol, status_response, field, tag):
+def test_optional_ack_is_not_status(protocol, status_response, field, tag, monkeypatch):
+    monkeypatch.setattr(protocol.api, "COMMAND_CONFIRMATION_TIMEOUT", 0.05)
+
     async def scenario():
         response = response_with_flags(status_response)
         client = protocol.api.TfiacClient(
@@ -119,10 +121,11 @@ def test_optional_ack_is_not_status(protocol, status_response, field, tag):
         client._send = AsyncMock(
             side_effect=[response, b"<msg><SetMessage /></msg>", response]
         )
-        result = await client.async_apply_changes(
-            protocol.models.TfiacChanges(**{field: True})
-        )
-        assert getattr(result, field) is False
+        with pytest.raises(protocol.api.TfiacCommandNotConfirmedError) as error:
+            await client.async_apply_changes(
+                protocol.models.TfiacChanges(**{field: True})
+            )
+        assert getattr(error.value.last_state, field) is False
         assert client._send.await_count == 3
 
     asyncio.run(scenario())

@@ -42,6 +42,8 @@ async def async_get_config_entry_diagnostics(
         "capabilities": asdict(state.capabilities),
         "optional_command_contract": {
             "profile": coordinator.client.command_profile.value,
+            # No identity/firmware detection certifies the connected device.
+            # Limited Livingroom validation does not make all models validated.
             "hardware_validated": False,
             "command_fields": dict(coordinator.client.command_profile.command_fields),
         },
