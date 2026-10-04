@@ -24,7 +24,16 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import TfiacConfigEntry, TfiacCoordinator
 from .entity import TfiacEntity
-from .models import MAX_TEMP, MIN_TEMP, Fan, Operation, Power, Preset, TfiacChanges
+from .models import (
+    MAX_TEMP,
+    MIN_TEMP,
+    Fan,
+    Operation,
+    Power,
+    Preset,
+    TfiacChanges,
+    sleep_allowed,
+)
 
 HVAC_MAP = {
     HVACMode.HEAT: Operation.HEAT,
@@ -122,6 +131,15 @@ class TfiacClimate(TfiacEntity, ClimateEntity):
     @property
     def preset_mode(self) -> str | None:
         return self.coordinator.data.preset
+
+    @property
+    def preset_modes(self) -> list[str]:
+        """Filter choices by current operation, without hiding actual flags."""
+        return [
+            preset
+            for preset in self._attr_preset_modes
+            if preset != PRESET_SLEEP or sleep_allowed(self.coordinator.data.operation)
+        ]
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Apply temperature and optional HVAC mode in one full-state command."""

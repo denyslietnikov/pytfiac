@@ -190,6 +190,53 @@ async def test_eco_is_not_a_preset(hass, entry, client):
     client.async_apply_changes.assert_not_awaited()
 
 
+@pytest.mark.parametrize("power", [Power.ON, Power.OFF])
+async def test_sleep_choices_follow_operation(hass, entry, client, ha_state, power):
+    client.async_update.return_value = replace(
+        ha_state, operation=Operation.FAN, power=power
+    )
+    entity_id = await setup(hass, entry)
+    assert hass.states.get(entity_id).attributes["preset_modes"] == ["none", "boost"]
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            "climate",
+            "set_preset_mode",
+            {"entity_id": entity_id, "preset_mode": "sleep"},
+            blocking=True,
+        )
+    client.async_apply_changes.assert_not_awaited()
+    for operation in (Operation.COOL, Operation.HEAT, Operation.DRY, Operation.AUTO):
+        entry.runtime_data.async_set_updated_data(
+            replace(ha_state, operation=operation, power=power)
+        )
+        await hass.async_block_till_done()
+        assert "sleep" in hass.states.get(entity_id).attributes["preset_modes"]
+    entry.runtime_data.async_set_updated_data(
+        replace(ha_state, operation=Operation.FAN, power=power)
+    )
+    await hass.async_block_till_done()
+    assert "sleep" not in hass.states.get(entity_id).attributes["preset_modes"]
+
+
+async def test_fan_only_does_not_hide_reported_sleep(hass, entry, client, ha_state):
+    client.async_update.return_value = replace(
+        ha_state, operation=Operation.FAN, sleep="sleepMode1:0", turbo=False
+    )
+    entity_id = await setup(hass, entry)
+    attrs = hass.states.get(entity_id).attributes
+    assert attrs["preset_mode"] == "sleep"
+    assert "sleep" not in attrs["preset_modes"]
+    await hass.services.async_call(
+        "climate",
+        "set_preset_mode",
+        {"entity_id": entity_id, "preset_mode": "none"},
+        blocking=True,
+    )
+    client.async_apply_changes.assert_awaited_once_with(
+        TfiacChanges(preset=Preset.NONE)
+    )
+
+
 async def test_metric_service_temperature_is_converted_by_ha(hass, entry, client):
     hass.config.units = METRIC_SYSTEM
     entity_id = await setup(hass, entry)

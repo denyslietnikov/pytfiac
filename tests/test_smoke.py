@@ -377,6 +377,7 @@ def test_cli_readonly_report_and_existing_file_protection(rig, tmp_path, monkeyp
 def test_active_initial_preset_is_restored_semantically(rig, preset):
     rig.client.state = replace(
         rig.client.state,
+        operation=rig.m.Operation.COOL,
         sleep="firmwareProfile:0" if preset == "sleep" else "off",
         turbo=preset == "boost",
     )
@@ -384,6 +385,20 @@ def test_active_initial_preset_is_restored_semantically(rig, preset):
     assert rig.report["result"] == "passed"
     assert rig.report["restored"]
     assert rig.client.state.preset == preset
+
+
+def test_sleep_in_fan_only_refuses_test_before_writes(rig):
+    rig.client.state = replace(
+        rig.client.state,
+        operation=rig.m.Operation.FAN,
+        sleep="firmwareProfile:0",
+        turbo=False,
+    )
+    with pytest.raises(ValueError, match="Sleep is not available in Fan Only"):
+        asyncio.run(rig.harness.run())
+    assert rig.report["result"] == "failed"
+    assert "Sleep is not available in Fan Only" in rig.report["preflight_error"]
+    assert not rig.client.calls
 
 
 @pytest.mark.parametrize("failure", [None, "timeout", "cancel"])

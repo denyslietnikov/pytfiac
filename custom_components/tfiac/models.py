@@ -39,6 +39,11 @@ class Operation(StrEnum):
     COOL = "cool"
 
 
+def sleep_allowed(operation: Operation) -> bool:
+    """Fan Only cannot activate Sleep (confirmed with the Ballu remote)."""
+    return operation != Operation.FAN
+
+
 class Fan(StrEnum):
     """Protocol fan values."""
 
@@ -168,6 +173,10 @@ def apply_changes(state: TfiacState, changes: TfiacChanges) -> TfiacState:
             updates[field] = value
     if changes.preset is not None:
         preset = Preset(changes.preset)
+        if preset == Preset.SLEEP and not sleep_allowed(
+            updates.get("operation", state.operation)
+        ):
+            raise ValueError("Sleep is not available in Fan Only mode")
         if preset == Preset.SLEEP and state.sleep is None:
             raise ValueError("Device does not report sleep mode")
         if preset == Preset.BOOST and state.turbo is None:

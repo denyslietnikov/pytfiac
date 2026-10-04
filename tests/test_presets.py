@@ -108,6 +108,53 @@ def test_removed_flags_are_not_command_intents(protocol):
             protocol.models.TfiacChanges(**{field: True})
 
 
+@pytest.mark.parametrize("power", ["on", "off"])
+@pytest.mark.parametrize("operation", ["heat", "selfFeel", "dehumi", "fan", "cool"])
+def test_sleep_requires_compatible_operation(protocol, state, power, operation):
+    current = replace(
+        state,
+        power=protocol.models.Power(power),
+        operation=protocol.models.Operation(operation),
+    )
+    changes = protocol.models.TfiacChanges(preset=protocol.models.Preset.SLEEP)
+    if operation == "fan":
+        with pytest.raises(ValueError, match="Sleep is not available in Fan Only"):
+            protocol.models.apply_changes(current, changes)
+    else:
+        desired = protocol.models.apply_changes(current, changes)
+        assert desired.preset == protocol.models.Preset.SLEEP
+        assert desired.power == current.power
+
+
+def test_sleep_validation_uses_fresh_status_before_write(protocol, status_response):
+    async def scenario():
+        root = ET.fromstring(status_response)
+        root.find("statusUpdateMsg/BaseMode").text = "fan"
+        client = protocol.api.TfiacClient("192.0.2.1")
+        client._send = AsyncMock(return_value=ET.tostring(root))
+        with pytest.raises(ValueError, match="Sleep is not available in Fan Only"):
+            await client.async_apply_changes(
+                protocol.models.TfiacChanges(preset=protocol.models.Preset.SLEEP)
+            )
+        client._send.assert_awaited_once()
+        assert b"SyncStatusReq" in client._send.await_args.args[0]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("preset", ["none", "boost"])
+def test_fan_only_still_allows_clearing_sleep_and_other_presets(
+    protocol, state, preset
+):
+    current = replace(
+        state, operation=protocol.models.Operation.FAN, sleep="sleepMode1:0"
+    )
+    desired = protocol.models.apply_changes(
+        current, protocol.models.TfiacChanges(preset=protocol.models.Preset(preset))
+    )
+    assert desired.sleep == "off"
+
+
 def test_no_preset_capability_is_unknown_and_cannot_be_written(protocol, state):
     current = replace(state, sleep=None, turbo=None)
     assert current.preset is None
