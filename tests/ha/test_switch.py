@@ -1,4 +1,4 @@
-"""Actual HA switch services and options with a synthetic XML device."""
+"""Actual HA switch services and upgrade migration with synthetic XML."""
 
 import asyncio
 from pathlib import Path
@@ -6,14 +6,13 @@ from unittest.mock import patch
 from xml.etree import ElementTree as ET
 
 import pytest
-from homeassistant.data_entry_flow import FlowResultType, InvalidData
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.tfiac.api import TfiacClient, TfiacTimeoutError
+from custom_components.tfiac.config_flow import TfiacConfigFlow
 from custom_components.tfiac.diagnostics import async_get_config_entry_diagnostics
-from custom_components.tfiac.models import CommandProfile
 
 pytestmark = pytest.mark.asyncio
 FIELDS = (
@@ -94,22 +93,7 @@ def switches(hass, entry):
     ]
 
 
-async def setup(hass, entry, device, *, profile=True, enable=False):
-    if profile:
-        hass.config_entries.async_update_entry(
-            entry,
-            options={**entry.options, "command_profile": "legacy_experimental"},
-        )
-    if enable:
-        for field, _, _ in FIELDS:
-            er.async_get(hass).async_get_or_create(
-                "switch",
-                "tfiac",
-                f"{entry.entry_id}_{field}",
-                config_entry=entry,
-                suggested_object_id=f"ac_{field}",
-                disabled_by=None,
-            )
+async def setup(hass, entry, device):
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
     device.requests.clear()
@@ -121,33 +105,24 @@ async def setup(hass, entry, device, *, profile=True, enable=False):
     }
 
 
-async def test_default_profile_creates_no_switches(hass, entry, device):
-    await setup(hass, entry, device, profile=False)
-    assert switches(hass, entry) == []
-    assert entry.runtime_data.client.command_profile == CommandProfile.DISABLED
-
-
-async def test_opted_in_entities_disabled_by_default_and_share_device(
+async def test_reported_entities_enabled_by_default_and_share_device(
     hass, entry, device
 ):
-    await setup(hass, entry, device)
+    entities = await setup(hass, entry, device)
     registered = switches(hass, entry)
     assert len(registered) == 2
     assert {item.unique_id for item in registered} == {
         f"{entry.entry_id}_{field}" for field, _, _ in FIELDS
     }
-    assert {item.original_name for item in registered} == {
-        "Display",
-        "Beep",
-    }
+    assert {item.original_name for item in registered} == {"Display", "Beep"}
+    assert all(item.disabled_by is None for item in registered)
     assert all(
-        item.disabled_by == er.RegistryEntryDisabler.INTEGRATION for item in registered
+        hass.states.get(entity_id).state == "off" for entity_id in entities.values()
     )
-    assert all(hass.states.get(item.entity_id) is None for item in registered)
     assert (
         len(dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)) == 1
     )
-    assert len(entry.runtime_data._listeners) == 1
+    assert len(entry.runtime_data._listeners) == 3
     assert device.requests == []
 
 
@@ -162,7 +137,7 @@ async def test_switch_services_exact_command_and_no_mode_rules(
     device.set(status_tag, "off" if enabled else "on")
     device.set("Opt_sleepMode", "customSleepProfile:private")
     device.set("TurnOn", "off")
-    entities = await setup(hass, entry, device, enable=True)
+    entities = await setup(hass, entry, device)
     # Physical remote changes the fan/temp since the cached coordinator snapshot.
     device.set("WindSpeed", "High")
     device.set("SetTemp", "79")
@@ -205,7 +180,7 @@ async def test_missing_invalid_conflicting_flags_do_not_create_controls(
 async def test_status_loss_is_unknown_then_service_rejected_without_write(
     hass, entry, device
 ):
-    entities = await setup(hass, entry, device, enable=True)
+    entities = await setup(hass, entry, device)
     device.set("Opt_display", "invalid")
     await entry.runtime_data.async_refresh()
     assert hass.states.get(entities["display"]).state == "unknown"
@@ -222,7 +197,7 @@ async def test_status_loss_is_unknown_then_service_rejected_without_write(
 async def test_no_optimism_or_retries_and_recovery(
     hass, entry, device, failure, monkeypatch
 ):
-    entities = await setup(hass, entry, device, enable=True)
+    entities = await setup(hass, entry, device)
     if failure == "ack_only":
         monkeypatch.setattr(
             "custom_components.tfiac.api.COMMAND_CONFIRMATION_TIMEOUT", 0.05
@@ -258,7 +233,7 @@ async def test_no_optimism_or_retries_and_recovery(
 
 
 async def test_concurrent_optional_climate_and_polling_share_lock(hass, entry, device):
-    entities = await setup(hass, entry, device, enable=True)
+    entities = await setup(hass, entry, device)
     climate_id = er.async_get(hass).async_get_entity_id(
         "climate", "tfiac", entry.entry_id
     )
@@ -296,91 +271,150 @@ async def test_concurrent_optional_climate_and_polling_share_lock(hass, entry, d
     assert ids == ["SyncStatusReq"]
 
 
-async def options(hass, entry, profile):
-    result = await hass.config_entries.options.async_init(entry.entry_id)
-    assert result["type"] == FlowResultType.FORM
-    result = await hass.config_entries.options.async_configure(
-        result["flow_id"], {"command_profile": profile}
-    )
-    await hass.async_block_till_done()
-    return result
-
-
-async def test_options_auto_reload_no_writes_preserves_options_and_ids(
-    hass, entry, device
+@pytest.mark.parametrize(
+    "profile", ["disabled", "legacy_experimental", "auto_guess", None]
+)
+async def test_upgrade_removes_legacy_profile_preserving_options_and_ids(
+    hass, entry, device, profile
 ):
     hass.config_entries.async_update_entry(
         entry,
-        options={"host": "192.0.2.2", "friendly_name": "Bedroom", "extra": "keep"},
+        options={
+            "host": "192.0.2.2",
+            "friendly_name": "Bedroom",
+            "extra": "keep",
+            "command_profile": profile,
+        },
     )
-    await setup(hass, entry, device, profile=False)
-    climate_before = er.async_get(hass).async_get_entity_id(
-        "climate", "tfiac", entry.entry_id
+    registry = er.async_get(hass)
+    climate = registry.async_get_or_create(
+        "climate",
+        "tfiac",
+        entry.entry_id,
+        config_entry=entry,
+        suggested_object_id="existing_ac",
     )
-    result = await options(hass, entry, "legacy_experimental")
-    assert result["type"] == FlowResultType.CREATE_ENTRY
+    old = {}
+    for field, _, _ in FIELDS:
+        old[field] = registry.async_get_or_create(
+            "switch",
+            "tfiac",
+            f"{entry.entry_id}_{field}",
+            config_entry=entry,
+            suggested_object_id=f"old_{field}",
+            disabled_by=er.RegistryEntryDisabler.INTEGRATION,
+        ).entity_id
+    entities = await setup(hass, entry, device)
+    assert entities == old
+    assert all(
+        registry.async_get(entity_id).disabled_by is None for entity_id in old.values()
+    )
+    assert all(hass.states.get(entity_id).state == "off" for entity_id in old.values())
     assert entry.options == {
         "host": "192.0.2.2",
         "friendly_name": "Bedroom",
         "extra": "keep",
-        "command_profile": "legacy_experimental",
     }
+    assert entry.version == 1
     assert (
-        entry.runtime_data.client.command_profile == CommandProfile.LEGACY_EXPERIMENTAL
+        registry.async_get_entity_id("climate", "tfiac", entry.entry_id)
+        == climate.entity_id
     )
-    assert len(switches(hass, entry)) == 2
-    assert device.hosts == ["192.0.2.2", "192.0.2.2"]
-    assert device.message_ids == ["SyncStatusReq"]
+    assert device.hosts == ["192.0.2.2"]
+    assert device.requests == []
     report = await async_get_config_entry_diagnostics(hass, entry)
     assert report["optional_command_contract"] == {
-        "profile": "legacy_experimental",
         "hardware_validated": False,
-        "command_fields": {
-            "display": "Opt_display",
-            "beep": "BeepEnable",
-        },
+        "command_fields": {"display": "Opt_display", "beep": "BeepEnable"},
     }
-    assert (
-        er.async_get(hass).async_get_entity_id("climate", "tfiac", entry.entry_id)
-        == climate_before
-    )
-    previous = {item.unique_id: item.entity_id for item in switches(hass, entry)}
-    await options(hass, entry, "disabled")
-    assert entry.runtime_data.client.command_profile == CommandProfile.DISABLED
-    assert len(entry.runtime_data._listeners) == 1
-    await options(hass, entry, "legacy_experimental")
-    assert {
-        item.unique_id: item.entity_id for item in switches(hass, entry)
-    } == previous
-    assert (
-        len(dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)) == 1
-    )
-    assert all(request.get("msgid") == "SyncStatusReq" for request in device.requests)
+    assert await hass.config_entries.async_reload(entry.entry_id)
+    await hass.async_block_till_done()
+    assert {item.unique_id: item.entity_id for item in switches(hass, entry)} == {
+        f"{entry.entry_id}_{field}": entity_id for field, entity_id in old.items()
+    }
+    assert device.message_ids == ["SyncStatusReq"]
+    assert device.hosts == ["192.0.2.2", "192.0.2.2"]
     assert await hass.config_entries.async_unload(entry.entry_id)
 
 
-async def test_disabling_profile_removes_enabled_controls_from_runtime(
+@pytest.mark.parametrize(
+    "disabled_by",
+    [
+        er.RegistryEntryDisabler.USER,
+        er.RegistryEntryDisabler.DEVICE,
+    ],
+)
+async def test_upgrade_preserves_non_integration_disablement(
+    hass, entry, device, disabled_by
+):
+    registry = er.async_get(hass)
+    old = registry.async_get_or_create(
+        "switch",
+        "tfiac",
+        f"{entry.entry_id}_display",
+        config_entry=entry,
+        suggested_object_id="old_display",
+        disabled_by=disabled_by,
+    )
+    await setup(hass, entry, device)
+    assert registry.async_get(old.entity_id).disabled_by == disabled_by
+    assert hass.states.get(old.entity_id) is None
+    assert device.requests == []
+
+
+@pytest.mark.parametrize("existing", [False, True])
+async def test_disable_new_entities_preference_is_respected(
+    hass, entry, device, existing
+):
+    hass.config_entries.async_update_entry(entry, pref_disable_new_entities=True)
+    registry = er.async_get(hass)
+    if existing:
+        registry.async_get_or_create(
+            "switch",
+            "tfiac",
+            f"{entry.entry_id}_display",
+            config_entry=entry,
+            disabled_by=er.RegistryEntryDisabler.INTEGRATION,
+        )
+    await setup(hass, entry, device)
+    assert len(switches(hass, entry)) == 2
+    assert all(item.disabled_by is not None for item in switches(hass, entry))
+    assert all(
+        hass.states.get(item.entity_id) is None for item in switches(hass, entry)
+    )
+    assert device.requests == []
+
+
+async def test_upgrade_does_not_enable_unreported_or_other_controls(
     hass, entry, device
 ):
-    entities = await setup(hass, entry, device, enable=True)
-    await options(hass, entry, "disabled")
-    assert len(entry.runtime_data._listeners) == 1
-    assert hass.states.get(entities["display"]).state == "unavailable"
-    assert all(request.get("msgid") == "SyncStatusReq" for request in device.requests)
-
-
-async def test_invalid_profile_does_not_change_options(hass, entry, device):
-    await setup(hass, entry, device, profile=False)
-    with pytest.raises(InvalidData):
-        await options(hass, entry, "auto_guess")
-    # Initial submitted data reaches the handler before any prior form schema.
-    result = await hass.config_entries.options.async_init(
-        entry.entry_id, data={"command_profile": "auto_guess"}
+    registry = er.async_get(hass)
+    old_ids = []
+    for field in ("display", "future"):
+        old_ids.append(
+            registry.async_get_or_create(
+                "switch",
+                "tfiac",
+                f"{entry.entry_id}_{field}",
+                config_entry=entry,
+                disabled_by=er.RegistryEntryDisabler.INTEGRATION,
+            ).entity_id
+        )
+    device.set("Opt_display", "invalid")
+    await setup(hass, entry, device)
+    assert all(
+        registry.async_get(entity_id).disabled_by
+        == er.RegistryEntryDisabler.INTEGRATION
+        for entity_id in old_ids
     )
-    assert result["type"] == FlowResultType.FORM
-    assert result["errors"] == {"command_profile": "invalid_profile"}
-    assert entry.options == {}
+    assert all(hass.states.get(entity_id) is None for entity_id in old_ids)
     assert device.requests == []
+
+
+async def test_no_options_flow(hass, entry):
+    flow = TfiacConfigFlow()
+    flow.hass = hass
+    assert not flow.async_supports_options_flow(entry)
 
 
 async def test_upgrade_removes_only_retired_eco_and_turbo_switches(hass, entry, device):
@@ -404,7 +438,7 @@ async def test_upgrade_removes_only_retired_eco_and_turbo_switches(hass, entry, 
         config_entry=entry,
         suggested_object_id="ac_future",
     )
-    entities = await setup(hass, entry, device, enable=True)
+    entities = await setup(hass, entry, device)
     assert all(registry.async_get(entity_id) is None for entity_id in old_ids)
     assert registry.async_get(keep.entity_id) is not None
     assert all(

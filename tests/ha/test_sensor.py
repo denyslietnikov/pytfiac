@@ -72,7 +72,7 @@ async def test_enabled_sensor_uses_coordinator_and_keeps_identity(
     assert state.attributes["device_class"] == "temperature"
     assert state.attributes["state_class"] == "measurement"
     assert state.attributes["unit_of_measurement"] == ("°C" if metric else "°F")
-    assert len(entry.runtime_data._listeners) == 2
+    assert len(entry.runtime_data._listeners) == 3
     client.async_update.return_value = replace(ha_state, outdoor_temperature=None)
     await entry.runtime_data.async_refresh()
     assert hass.states.get(previous.entity_id).state == "unknown"

@@ -7,22 +7,26 @@ from homeassistant.helpers import entity_registry as er
 from .api import TfiacClient
 from .const import CONF_COMMAND_PROFILE
 from .coordinator import TfiacConfigEntry, TfiacCoordinator
-from .models import CommandProfile
 
 PLATFORMS = [Platform.CLIMATE, Platform.SENSOR, Platform.SWITCH]
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: TfiacConfigEntry) -> bool:
     """Retry setup automatically when the first device read fails."""
-    client = TfiacClient(
-        entry.options.get(CONF_HOST, entry.data[CONF_HOST]),
-        command_profile=CommandProfile(
-            entry.options.get(CONF_COMMAND_PROFILE, CommandProfile.DISABLED)
-        ),
-    )
+    client = TfiacClient(entry.options.get(CONF_HOST, entry.data[CONF_HOST]))
     coordinator = TfiacCoordinator(hass, entry, client)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
+    # Retire the opt-in without touching legacy host overrides or user options.
+    if CONF_COMMAND_PROFILE in entry.options:
+        hass.config_entries.async_update_entry(
+            entry,
+            options={
+                key: value
+                for key, value in entry.options.items()
+                if key != CONF_COMMAND_PROFILE
+            },
+        )
     # Remove only our superseded beta switches. Keep climate/Display/Beep IDs.
     registry = er.async_get(hass)
     removed_ids = {f"{entry.entry_id}_eco", f"{entry.entry_id}_turbo"}

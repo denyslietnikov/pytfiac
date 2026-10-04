@@ -166,10 +166,7 @@ def test_optional_confirmation_waits_through_missing_and_old_flags(
         status.append(node)
         node.text = "on"
         after = ET.tostring(root)
-        client = protocol.api.TfiacClient(
-            "192.0.2.1",
-            command_profile=protocol.models.CommandProfile.LEGACY_EXPERIMENTAL,
-        )
+        client = protocol.api.TfiacClient("192.0.2.1")
         client._send = AsyncMock(
             side_effect=[before, b"<msg><SetMessage /></msg>", missing, before, after]
         )

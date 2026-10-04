@@ -67,6 +67,10 @@ jobs:
     steps:
       - name: Validate HACS repository
         uses: hacs/action@main
+        env:
+          # HACS does not read release.tag_name; without this it falls back to master.
+          # Use the PR head in its fork, otherwise the exact triggering commit.
+          REPOSITORY_REF: ${{ github.event.pull_request.head.sha || github.sha }}
         with:
           category: integration
 

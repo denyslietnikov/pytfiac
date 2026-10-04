@@ -1,10 +1,11 @@
-"""Explicitly opted-in optional controls, sharing the climate coordinator."""
+"""Reported Display/Beep controls, sharing the climate coordinator."""
 
 from dataclasses import dataclass
 from typing import Any
 
 from homeassistant.components.switch import SwitchEntity, SwitchEntityDescription
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import TfiacConfigEntry, TfiacCoordinator
@@ -24,7 +25,6 @@ SWITCHES = tuple(
         key=field,
         translation_key=field,
         state_field=field,
-        entity_registry_enabled_default=False,
     )
     for field in ("display", "beep")
 )
@@ -35,14 +35,28 @@ async def async_setup_entry(
     entry: TfiacConfigEntry,
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
-    """Require both an explicit command contract and usable initial status."""
+    """Create usable controls and retire integration-imposed beta disablement."""
     coordinator = entry.runtime_data
-    writable = dict(coordinator.client.command_profile.command_fields)
-    async_add_entities(
-        TfiacOptionalSwitch(coordinator, description)
+    descriptions = [
+        description
         for description in SWITCHES
-        if description.state_field in writable
-        and getattr(coordinator.data.capabilities, description.state_field)
+        if getattr(coordinator.data.capabilities, description.state_field)
+    ]
+    registry = er.async_get(hass)
+    if not entry.pref_disable_new_entities:
+        for description in descriptions:
+            entity_id = registry.async_get_entity_id(
+                "switch", "tfiac", f"{entry.entry_id}_{description.key}"
+            )
+            if (
+                entity_id is not None
+                and (entity := registry.async_get(entity_id)) is not None
+                and entity.config_entry_id == entry.entry_id
+                and entity.disabled_by == er.RegistryEntryDisabler.INTEGRATION
+            ):
+                registry.async_update_entity(entity_id, disabled_by=None)
+    async_add_entities(
+        TfiacOptionalSwitch(coordinator, description) for description in descriptions
     )
 
 

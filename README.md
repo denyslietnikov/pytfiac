@@ -10,7 +10,7 @@ Requires **Home Assistant 2026.9.4+** and local network access to the AC (UDP 77
 - Cool, Heat, Dry, Fan Only and Auto modes
 - Fan speed, independent vertical/horizontal swing and Sleep/Boost (Turbo) presets
 - Current and target temperature
-- Experimental Display, Beep and outdoor temperature
+- Display and Beep switches; experimental outdoor temperature
 - Apple Home and Siri through [HomeKit Bridge](https://www.home-assistant.io/integrations/homekit/)
 
 ## Installation
@@ -35,10 +35,10 @@ Use the climate entity for normal control. Presets: `sleep`, `boost` (Turbo),
 or `none` to disable both. Sleep and Turbo are mutually exclusive.
 **Reconfigure** changes the AC's IP address.
 
-For optional switches, select **Configure → Optional command profile →
-Experimental commands (model-specific)**, then enable individual entities on the
-device page. These switches and the outdoor sensor are disabled by default;
-test them on your model before using them in automations.
+Display and Beep switches appear automatically when the AC reports usable status.
+Updating enables previously integration-disabled switches, preserving their IDs
+and any manual disablement. Loading the integration sends no control commands.
+The outdoor sensor remains disabled by default; verify it before use.
 
 Temperatures follow your HA unit settings. The current range is `61–88 °F`;
 for tenth-degree Celsius requests, use `16.2–31.1 °C`. Hardware limits and steps

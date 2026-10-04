@@ -10,6 +10,8 @@ MAX_TEMP = 88
 TEMPERATURE_DECIMAL_PLACES = 2
 SLEEP_MODE_ON = "sleepMode1:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0"
 OPTIONAL_CONTROL_FIELDS = ("display", "beep")
+# Fixed Livingroom-tested writers, never guessed from status aliases.
+OPTIONAL_COMMAND_FIELDS = (("display", "Opt_display"), ("beep", "BeepEnable"))
 
 
 class Preset(StrEnum):
@@ -18,23 +20,6 @@ class Preset(StrEnum):
     NONE = "none"
     SLEEP = "sleep"
     BOOST = "boost"
-
-
-class CommandProfile(StrEnum):
-    """Explicit opt-in contracts, never inferred from a reported status tag."""
-
-    DISABLED = "disabled"
-    LEGACY_EXPERIMENTAL = "legacy_experimental"
-
-    @property
-    def command_fields(self) -> tuple[tuple[str, str], ...]:
-        """Livingroom-tested spellings; other firmware still requires validation."""
-        if self == self.LEGACY_EXPERIMENTAL:
-            return (
-                ("display", "Opt_display"),
-                ("beep", "BeepEnable"),
-            )
-        return ()
 
 
 class Power(StrEnum):
@@ -134,7 +119,7 @@ class TfiacState:
 
 @dataclass(frozen=True, slots=True)
 class TfiacChanges:
-    """Requested fields; optional writes also require a client command profile."""
+    """Requested fields; optional writes require usable fresh device status."""
 
     power: Power | None = None
     operation: Operation | None = None

@@ -7,7 +7,12 @@ from homeassistant.components.diagnostics import REDACTED, async_redact_data
 from homeassistant.core import HomeAssistant
 
 from .coordinator import TfiacConfigEntry
-from .models import MAX_TEMP, MIN_TEMP, TEMPERATURE_DECIMAL_PLACES
+from .models import (
+    MAX_TEMP,
+    MIN_TEMP,
+    OPTIONAL_COMMAND_FIELDS,
+    TEMPERATURE_DECIMAL_PLACES,
+)
 
 
 async def async_get_config_entry_diagnostics(
@@ -42,11 +47,10 @@ async def async_get_config_entry_diagnostics(
         ),
         "capabilities": asdict(state.capabilities),
         "optional_command_contract": {
-            "profile": coordinator.client.command_profile.value,
             # No identity/firmware detection certifies the connected device.
             # Limited Livingroom validation does not make all models validated.
             "hardware_validated": False,
-            "command_fields": dict(coordinator.client.command_profile.command_fields),
+            "command_fields": dict(OPTIONAL_COMMAND_FIELDS),
         },
         "status": {
             "name": REDACTED if state.name is not None else None,

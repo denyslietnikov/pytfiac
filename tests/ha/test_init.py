@@ -8,7 +8,6 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 
 from custom_components.tfiac.api import TfiacTimeoutError
-from custom_components.tfiac.models import CommandProfile
 
 pytestmark = pytest.mark.asyncio
 
@@ -29,13 +28,13 @@ async def test_setup_reload_unload_keep_registry(hass, entry, client):
     assert entry.unique_id == "legacy-id"
     assert entry.version == 1
     assert hass.states.get(previous.entity_id) is not None
-    assert len(er.async_entries_for_config_entry(registry, entry.entry_id)) == 1
+    assert len(er.async_entries_for_config_entry(registry, entry.entry_id)) == 2
     devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
     assert len(devices) == 1
     assert devices[0].identifiers == {("tfiac", entry.entry_id)}
     assert await hass.config_entries.async_reload(entry.entry_id)
     await hass.async_block_till_done()
-    assert len(er.async_entries_for_config_entry(registry, entry.entry_id)) == 1
+    assert len(er.async_entries_for_config_entry(registry, entry.entry_id)) == 2
     assert hass.states.get(previous.entity_id).state == "auto"
     assert coordinator._shutdown_requested
     reloaded_coordinator = entry.runtime_data
@@ -46,10 +45,15 @@ async def test_setup_reload_unload_keep_registry(hass, entry, client):
 
 
 async def test_offline_setup_retries(hass, entry, client):
+    hass.config_entries.async_update_entry(
+        entry, options={"command_profile": "disabled", "extra": "keep"}
+    )
     client.async_update.side_effect = TfiacTimeoutError()
     assert not await hass.config_entries.async_setup(entry.entry_id)
     assert entry.state == ConfigEntryState.SETUP_RETRY
     assert not er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)
+    assert entry.options == {"command_profile": "disabled", "extra": "keep"}
+    client.async_apply_changes.assert_not_awaited()
 
 
 async def test_legacy_host_and_name(hass, entry, client):
@@ -61,8 +65,6 @@ async def test_legacy_host_and_name(hass, entry, client):
     ) as constructor:
         assert await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
-    constructor.assert_called_once_with(
-        "192.0.2.2", command_profile=CommandProfile.DISABLED
-    )
+    constructor.assert_called_once_with("192.0.2.2")
     devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
     assert devices[0].name == "Bedroom"

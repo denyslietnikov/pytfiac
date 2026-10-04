@@ -319,7 +319,7 @@ def parse_args(argv=None, *, environ=None):
         nargs="+",
         choices=("display", "beep"),
         default=[],
-        help="Explicit opt-in to experimental commands",
+        help="Explicitly include Display/Beep hardware checks",
     )
     parser.add_argument(
         "--modes",
@@ -406,12 +406,7 @@ def main(argv=None):
 
         persist()
         protocol = load_protocol()
-        profile = (
-            protocol.models.CommandProfile.LEGACY_EXPERIMENTAL
-            if args.optional
-            else protocol.models.CommandProfile.DISABLED
-        )
-        client = protocol.api.TfiacClient(args.host, command_profile=profile)
+        client = protocol.api.TfiacClient(args.host)
         try:
             asyncio.run(SmokeHarness(protocol, client, args, report, persist).run())
         except (KeyboardInterrupt, asyncio.CancelledError):

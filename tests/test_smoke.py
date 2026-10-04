@@ -432,9 +432,7 @@ def test_cli_write_exit_codes_and_durable_snapshot(rig, tmp_path, monkeypatch, f
 def test_real_bundled_client_with_synthetic_xml_device(rig):
     p, m = rig.p, rig.m
     state = rig.initial
-    client = p.api.TfiacClient(
-        "192.0.2.1", command_profile=m.CommandProfile.LEGACY_EXPERIMENTAL
-    )
+    client = p.api.TfiacClient("192.0.2.1")
 
     async def send(message):
         nonlocal state

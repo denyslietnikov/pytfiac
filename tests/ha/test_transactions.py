@@ -272,9 +272,9 @@ def wire(status_response):
 async def setup(hass, entry, wire):
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    entity_id = er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)[
-        0
-    ].entity_id
+    entity_id = er.async_get(hass).async_get_entity_id(
+        "climate", "tfiac", entry.entry_id
+    )
     wire.requests.clear()
     return entity_id
 
@@ -357,7 +357,6 @@ async def test_preset_transitions_are_one_write_with_distinct_encodings(
         "sleep",
         "boost",
     ]
-    assert entry.runtime_data.client.command_profile.value == "disabled"
     # A remote changes core settings after the cached HA snapshot.
     status.find("WindSpeed").text = "High"
     status.find("SetTemp").text = "79"
@@ -729,6 +728,8 @@ async def test_reconfigure_reloads_real_client_without_new_entity(hass, entry, w
     registry_entries = er.async_entries_for_config_entry(
         er.async_get(hass), entry.entry_id
     )
-    assert len(registry_entries) == 1
-    assert registry_entries[0].entity_id == entity_id
+    assert len(registry_entries) == 2
+    assert {
+        item.entity_id for item in registry_entries if item.domain == "climate"
+    } == {entity_id}
     assert hass.states.get(entity_id).state == "auto"

@@ -1,4 +1,4 @@
-"""Explicit experimental wire contracts, without Home Assistant or hardware."""
+"""Fixed Display/Beep wire contracts, without Home Assistant or hardware."""
 
 import asyncio
 from dataclasses import replace
@@ -34,7 +34,6 @@ def test_exact_optional_payload(protocol, state, field, tag, enabled):
         protocol.api.build_optional_message(
             desired,
             changes,
-            protocol.models.CommandProfile.LEGACY_EXPERIMENTAL,
             "123",
         )
     ).find("SetMessage")
@@ -56,15 +55,23 @@ def test_exact_optional_payload(protocol, state, field, tag, enabled):
 
 
 @pytest.mark.parametrize("field,tag", FIELDS)
-def test_default_profile_blocks_optional_before_io(protocol, field, tag):
+def test_default_client_writes_reported_control(protocol, status_response, field, tag):
     async def scenario():
+        before = response_with_flags(status_response)
+        root = ET.fromstring(before)
+        root.find(f"statusUpdateMsg/{tag}").text = "on"
+        after = ET.tostring(root)
         client = protocol.api.TfiacClient("192.0.2.1")
-        client._send = AsyncMock()
-        with pytest.raises(ValueError, match="enabled profile"):
-            await client.async_apply_changes(
-                protocol.models.TfiacChanges(**{field: True})
-            )
-        client._send.assert_not_awaited()
+        client._send = AsyncMock(
+            side_effect=[before, b"<msg><SetMessage /></msg>", after]
+        )
+        result = await client.async_apply_changes(
+            protocol.models.TfiacChanges(**{field: True})
+        )
+        assert getattr(result, field) is True
+        assert client._send.await_count == 3
+        message = ET.fromstring(client._send.await_args_list[1].args[0])
+        assert message.find(f"SetMessage/{tag}").text == "on"
 
     asyncio.run(scenario())
 
@@ -92,10 +99,7 @@ def test_invalid_or_missing_status_cannot_be_written(
 )
 def test_optional_mixed_intent_rejected_before_io(protocol, extra):
     async def scenario():
-        client = protocol.api.TfiacClient(
-            "192.0.2.1",
-            command_profile=protocol.models.CommandProfile.LEGACY_EXPERIMENTAL,
-        )
+        client = protocol.api.TfiacClient("192.0.2.1")
         client._send = AsyncMock()
         with pytest.raises(ValueError):
             await client.async_apply_changes(
@@ -112,10 +116,7 @@ def test_optional_ack_is_not_status(protocol, status_response, field, tag, monke
 
     async def scenario():
         response = response_with_flags(status_response)
-        client = protocol.api.TfiacClient(
-            "192.0.2.1",
-            command_profile=protocol.models.CommandProfile.LEGACY_EXPERIMENTAL,
-        )
+        client = protocol.api.TfiacClient("192.0.2.1")
         client._send = AsyncMock(
             side_effect=[response, b"<msg><SetMessage /></msg>", response]
         )
@@ -131,10 +132,7 @@ def test_optional_ack_is_not_status(protocol, status_response, field, tag, monke
 
 def test_optional_noop_is_read_only(protocol, status_response):
     async def scenario():
-        client = protocol.api.TfiacClient(
-            "192.0.2.1",
-            command_profile=protocol.models.CommandProfile.LEGACY_EXPERIMENTAL,
-        )
+        client = protocol.api.TfiacClient("192.0.2.1")
         client._send = AsyncMock(return_value=response_with_flags(status_response))
         await client.async_apply_changes(protocol.models.TfiacChanges(display=False))
         client._send.assert_awaited_once()
@@ -142,35 +140,22 @@ def test_optional_noop_is_read_only(protocol, status_response):
     asyncio.run(scenario())
 
 
-def test_invalid_profile_fails_closed(protocol):
-    with pytest.raises(ValueError):
-        protocol.api.TfiacClient("192.0.2.1", command_profile="auto_guess")
-
-
 @pytest.mark.parametrize(
-    "profile,changes",
-    [
-        ("disabled", {"display": True}),
-        ("legacy_experimental", {}),
-        ("legacy_experimental", {"display": True, "beep": True}),
-    ],
+    "changes",
+    [{}, {"display": True, "beep": True}],
 )
-def test_builder_requires_explicit_single_flag(protocol, state, profile, changes):
+def test_builder_requires_explicit_single_flag(protocol, state, changes):
     with pytest.raises(ValueError):
         protocol.api.build_optional_message(
             state,
             protocol.models.TfiacChanges(**changes),
-            protocol.models.CommandProfile(profile),
             "123",
         )
 
 
 def test_missing_optional_status_after_refresh_blocks_write(protocol, status_response):
     async def scenario():
-        client = protocol.api.TfiacClient(
-            "192.0.2.1",
-            command_profile=protocol.models.CommandProfile.LEGACY_EXPERIMENTAL,
-        )
+        client = protocol.api.TfiacClient("192.0.2.1")
         client._send = AsyncMock(return_value=status_response)
         with pytest.raises(ValueError):
             await client.async_apply_changes(protocol.models.TfiacChanges(display=True))

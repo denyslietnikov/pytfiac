@@ -20,9 +20,7 @@ pytestmark = pytest.mark.asyncio
 async def setup(hass, entry):
     assert await hass.config_entries.async_setup(entry.entry_id)
     await hass.async_block_till_done()
-    return er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)[
-        0
-    ].entity_id
+    return er.async_get(hass).async_get_entity_id("climate", "tfiac", entry.entry_id)
 
 
 async def test_boost_preset_icon(hass, entry, client, ha_state):

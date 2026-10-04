@@ -25,28 +25,6 @@
       }
     }
   },
-  "options": {
-    "error": {
-      "invalid_profile": "Select a supported command profile"
-    },
-    "step": {
-      "init": {
-        "title": "Optional controls",
-        "description": "Keep Disabled until tested on your model. Command fields for Display and Beep were tested on the maintainer's Livingroom AC, not all firmware or mode combinations. After opting in, enable individual switch entities for hardware testing. Sleep and Boost (Turbo) are climate presets and do not require this option. Changing this option reloads the integration but sends no AC commands.",
-        "data": {
-          "command_profile": "Optional command profile"
-        }
-      }
-    }
-  },
-  "selector": {
-    "command_profile": {
-      "options": {
-        "disabled": "Disabled (recommended)",
-        "legacy_experimental": "Experimental commands (model-specific)"
-      }
-    }
-  },
   "entity": {
     "switch": {
       "display": {"name": "Display"},

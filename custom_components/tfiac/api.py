@@ -9,9 +9,9 @@ from time import time_ns
 from xml.etree import ElementTree as ET
 
 from .models import (
+    OPTIONAL_COMMAND_FIELDS,
     OPTIONAL_CONTROL_FIELDS,
     TEMPERATURE_DECIMAL_PLACES,
-    CommandProfile,
     Fan,
     Operation,
     Power,
@@ -252,23 +252,21 @@ def build_swing_message(state: TfiacState, seq: str) -> bytes:
     return _envelope("SetMessage", fields, seq)
 
 
-def build_optional_message(
-    state: TfiacState, changes: TfiacChanges, profile: CommandProfile, seq: str
-) -> bytes:
+def build_optional_message(state: TfiacState, changes: TfiacChanges, seq: str) -> bytes:
     """Legacy full-state envelope plus exactly one explicitly requested flag.
 
     Preserve fresh core/sleep state, but never echo unrelated optional/raw fields.
-    This experimental wire contract is not a claim about all device firmware.
+    Fixed writers were tested on Livingroom, not every device firmware.
     """
     requested = [
         field
         for field in OPTIONAL_CONTROL_FIELDS
         if getattr(changes, field) is not None
     ]
-    if len(requested) != 1 or not profile.command_fields:
-        raise ValueError("Optional controls require an enabled profile and one flag")
+    if len(requested) != 1:
+        raise ValueError("Optional controls require one flag")
     field = requested[0]
-    tag = dict(profile.command_fields)[field]
+    tag = dict(OPTIONAL_COMMAND_FIELDS)[field]
     value = getattr(state, field)
     if not isinstance(value, bool):
         raise ValueError(f"Device does not report a usable {field} status")
@@ -338,11 +336,8 @@ def _changes_confirmed(
 class TfiacClient:
     """Serialize status reads and complete read/write/confirmation transactions."""
 
-    def __init__(
-        self, host: str, *, command_profile: CommandProfile = CommandProfile.DISABLED
-    ) -> None:
+    def __init__(self, host: str) -> None:
         self.host = host
-        self.command_profile = CommandProfile(command_profile)
         self._lock = asyncio.Lock()
         self._last_sequence = 0
         self._known_preset_fields: set[str] = set()
@@ -429,15 +424,8 @@ class TfiacClient:
         preset = changes.preset is not None
         if preset and (swing or full_state or optional):
             raise ValueError("Presets require a separate command")
-        if optional and (
-            not self.command_profile.command_fields
-            or len(optional) != 1
-            or swing
-            or full_state
-        ):
-            raise ValueError(
-                "Optional controls require an enabled profile and a separate single-flag command"
-            )
+        if optional and (len(optional) != 1 or swing or full_state):
+            raise ValueError("Optional controls require a separate single-flag command")
         if swing and full_state:
             raise ValueError("Swing and full-state changes require separate commands")
         async with self._lock:
@@ -457,9 +445,7 @@ class TfiacClient:
                 else build_set_message
             )
             message = (
-                build_optional_message(
-                    desired, changes, self.command_profile, self._sequence()
-                )
+                build_optional_message(desired, changes, self._sequence())
                 if optional
                 else builder(desired, self._sequence())
             )
