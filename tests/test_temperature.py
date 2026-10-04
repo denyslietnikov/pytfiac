@@ -11,6 +11,7 @@ import pytest
 @pytest.mark.parametrize(
     "requested,expected",
     [
+        (60.8, 60.8),
         (61, 61.0),
         (88, 88.0),
         (78.8, 78.8),
@@ -35,7 +36,7 @@ def test_request_has_same_precision_as_decoded_status(
 @pytest.mark.parametrize(
     "requested",
     [
-        60.9999,
+        60.7999,
         88.0001,
         60,
         89,
@@ -66,6 +67,37 @@ def test_degree_half_does_not_quantize_temperature(protocol, state, degree_half)
     payload = ET.fromstring(protocol.api.build_set_message(desired, "123"))
     assert payload.find("SetMessage/SetTemp").text == "78.8"
     assert payload.find("SetMessage/Degree_Half") is None
+
+
+@pytest.mark.parametrize("power", ["on", "off"])
+def test_fan_only_has_no_temperature_intent_but_can_switch_to_cool(
+    protocol, state, power
+):
+    current = replace(
+        state,
+        operation=protocol.models.Operation.FAN,
+        power=protocol.models.Power(power),
+    )
+    with pytest.raises(ValueError, match="not available in Fan Only"):
+        protocol.models.apply_changes(
+            current, protocol.models.TfiacChanges(target_temperature=73)
+        )
+    with pytest.raises(ValueError, match="not available in Fan Only"):
+        protocol.models.apply_changes(
+            state,
+            protocol.models.TfiacChanges(
+                operation=protocol.models.Operation.FAN, target_temperature=73
+            ),
+        )
+    desired = protocol.models.apply_changes(
+        current,
+        protocol.models.TfiacChanges(
+            operation=protocol.models.Operation.COOL, target_temperature=73
+        ),
+    )
+    assert desired.target_temperature == 73
+    assert desired.operation == protocol.models.Operation.COOL
+    assert desired.power == protocol.models.Power.ON
 
 
 def test_long_fraction_is_confirmed_without_write_retry(

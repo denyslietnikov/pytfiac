@@ -4,8 +4,9 @@ from dataclasses import dataclass, replace
 from dataclasses import field as dataclass_field
 from enum import StrEnum
 
-MIN_TEMP = 61
+MIN_TEMP = 60.8  # 16 °C, including the documented Super cooling setpoint.
 MAX_TEMP = 88
+BOOST_TEMPERATURES = {"cool": 60.8, "heat": 87.8}  # 16 / 31 °C in native °F.
 # Existing status decoder precision, not a hardware setpoint increment.
 TEMPERATURE_DECIMAL_PLACES = 2
 SLEEP_MODE_ON = "sleepMode1:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0"
@@ -41,6 +42,16 @@ class Operation(StrEnum):
 
 def sleep_allowed(operation: Operation) -> bool:
     """Fan Only cannot activate Sleep (confirmed with the Ballu remote)."""
+    return operation != Operation.FAN
+
+
+def boost_allowed(operation: Operation) -> bool:
+    """Only advertise Super in the two operations described by Ballu."""
+    return operation in BOOST_TEMPERATURES
+
+
+def target_temperature_allowed(operation: Operation) -> bool:
+    """Fan Only circulates air without a temperature target."""
     return operation != Operation.FAN
 
 
@@ -155,7 +166,7 @@ def normalize_target_temperature(temperature: float) -> float:
 
 
 def apply_changes(state: TfiacState, changes: TfiacChanges) -> TfiacState:
-    """Validate requested changes without inventing device-specific rules."""
+    """Apply explicit intents and documented Ballu Super setpoints."""
     updates = {}
     for field, enum in (("power", Power), ("operation", Operation), ("fan", Fan)):
         if (value := getattr(changes, field)) is not None:
@@ -165,6 +176,8 @@ def apply_changes(state: TfiacState, changes: TfiacChanges) -> TfiacState:
             raise ValueError("Cannot select an operation and turn off together")
         updates["power"] = Power.ON
     if (temperature := changes.target_temperature) is not None:
+        if not target_temperature_allowed(updates.get("operation", state.operation)):
+            raise ValueError("Target temperature is not available in Fan Only mode")
         updates["target_temperature"] = normalize_target_temperature(temperature)
     for field in ("swing_horizontal", "swing_vertical"):
         if (value := getattr(changes, field)) is not None:
@@ -181,6 +194,11 @@ def apply_changes(state: TfiacState, changes: TfiacChanges) -> TfiacState:
             raise ValueError("Device does not report sleep mode")
         if preset == Preset.BOOST and state.turbo is None:
             raise ValueError("Device does not report a usable turbo status")
+        if preset == Preset.BOOST:
+            operation = updates.get("operation", state.operation)
+            if not boost_allowed(operation):
+                raise ValueError("Boost is available only in Cool or Heat mode")
+            updates["target_temperature"] = BOOST_TEMPERATURES[operation]
         if state.sleep is None and state.turbo is None:
             raise ValueError("Device does not report presets")
         if state.sleep is not None:

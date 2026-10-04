@@ -20,6 +20,7 @@ pytestmark = pytest.mark.asyncio
 @pytest.mark.parametrize(
     "units,requested,wire_temperature,display_temperature",
     [
+        (METRIC_SYSTEM, 16, 60.8, 16),
         (METRIC_SYSTEM, 26, 78.8, 26),
         (METRIC_SYSTEM, 23.3, 73.94, 23.3),
         (METRIC_SYSTEM, 23.01, 73.42, 23),
@@ -83,12 +84,12 @@ async def test_native_range_and_unknown_step_are_not_inferred(
     entity_id = await setup(hass, entry, wire)
     entity = hass.data["climate"].get_entity(entity_id)
     assert entity.temperature_unit == "°F"
-    assert entity.min_temp == 61
+    assert entity.min_temp == 60.8
     assert entity.max_temp == 88
     assert entity.target_temperature_step is None
     actual = hass.states.get(entity_id)
     assert "target_temp_step" not in actual.attributes
-    assert actual.attributes["min_temp"] == (16.1 if units == METRIC_SYSTEM else 61)
+    assert actual.attributes["min_temp"] == (16 if units == METRIC_SYSTEM else 61)
     assert actual.attributes["max_temp"] == (31.1 if units == METRIC_SYSTEM else 88)
     assert wire.requests == []
 
@@ -96,9 +97,9 @@ async def test_native_range_and_unknown_step_are_not_inferred(
 @pytest.mark.parametrize(
     "units,requested",
     [
-        (METRIC_SYSTEM, 16.1),
+        (METRIC_SYSTEM, 15.9),
         (METRIC_SYSTEM, 31.2),
-        (US_CUSTOMARY_SYSTEM, 60.9999),
+        (US_CUSTOMARY_SYSTEM, 60.7999),
         (US_CUSTOMARY_SYSTEM, 88.0001),
     ],
 )
@@ -323,6 +324,8 @@ async def setup(hass, entry, wire):
 async def test_controls_read_back_real_snapshot(
     hass, entry, wire, service, data, attribute, expected
 ):
+    if data.get("preset_mode") == "boost":
+        wire.root.find("statusUpdateMsg/BaseMode").text = "cool"
     entity_id = await setup(hass, entry, wire)
     await hass.services.async_call(
         "climate", service, {"entity_id": entity_id, **data}, blocking=True
@@ -347,6 +350,7 @@ async def test_preset_transitions_are_one_write_with_distinct_encodings(
 ):
     status = wire.root.find("statusUpdateMsg")
     status.find("TurnOn").text = power
+    status.find("BaseMode").text = "cool"
     status.find("Opt_sleepMode").text = (
         "sleepMode1:0:0" if initial == "sleep" else "off"
     )
@@ -368,10 +372,10 @@ async def test_preset_transitions_are_one_write_with_distinct_encodings(
     )
     actual = hass.states.get(entity_id)
     assert actual.attributes["preset_mode"] == preset
-    assert actual.state == ("off" if power == "off" else "auto")
+    assert actual.state == ("off" if power == "off" else "cool")
     assert actual.attributes["fan_mode"] == "high"
-    assert actual.attributes["temperature"] == 79
-    if initial == preset:
+    assert actual.attributes["temperature"] == (61 if preset == "boost" else 79)
+    if initial == preset and preset != "boost":
         assert wire.message_ids == ["SyncStatusReq"]
         return
     assert wire.message_ids == ["SyncStatusReq", "SetMessage", "SyncStatusReq"]
@@ -384,7 +388,7 @@ async def test_preset_transitions_are_one_write_with_distinct_encodings(
     )
     assert fields["TurnOn"] == power
     assert fields["WindSpeed"] == "High"
-    assert fields["SetTemp"] == "79.0"
+    assert fields["SetTemp"] == ("60.8" if preset == "boost" else "79.0")
     assert set(fields) == {
         "TurnOn",
         "BaseMode",
@@ -397,7 +401,12 @@ async def test_preset_transitions_are_one_write_with_distinct_encodings(
 
 @pytest.mark.parametrize(
     "preset,ignored",
-    [("sleep", "Opt_super"), ("boost", "Opt_sleepMode"), ("none", "Opt_super")],
+    [
+        ("sleep", "Opt_super"),
+        ("boost", "Opt_sleepMode"),
+        ("none", "Opt_super"),
+        ("boost", "SetTemp"),
+    ],
 )
 async def test_preset_partial_application_is_not_success(
     hass, entry, wire, monkeypatch, preset, ignored
@@ -405,11 +414,10 @@ async def test_preset_partial_application_is_not_success(
     monkeypatch.setattr(
         "custom_components.tfiac.api.COMMAND_CONFIRMATION_TIMEOUT", 0.03
     )
-    monkeypatch.setattr(
-        "custom_components.tfiac.api.COMMAND_CONFIRMATION_INTERVAL", 0.001
-    )
+    monkeypatch.setattr("custom_components.tfiac.api.COMMAND_CONFIRMATION_INTERVAL", 1)
     status = wire.root.find("statusUpdateMsg")
     status.find("Opt_super").text = "off" if preset == "boost" else "on"
+    status.find("BaseMode").text = "cool"
     status.find("Opt_sleepMode").text = "sleepMode1:0:0" if preset == "boost" else "off"
     entity_id = await setup(hass, entry, wire)
     old_send = wire.send
@@ -432,10 +440,87 @@ async def test_preset_partial_application_is_not_success(
         )
     assert entry.runtime_data.last_update_success
     assert sum(request.get("msgid") == "SetMessage" for request in wire.requests) == 1
-    assert hass.states.get(entity_id).attributes["preset_mode"] != preset
+    actual = hass.states.get(entity_id)
+    if ignored == "SetTemp":
+        assert actual.attributes["preset_mode"] == preset
+        assert actual.attributes["temperature"] != 61
+    else:
+        assert actual.attributes["preset_mode"] != preset
+
+
+@pytest.mark.parametrize(
+    "mode,native,displayed", [("cool", 60.8, 16), ("heat", 87.8, 31)]
+)
+@pytest.mark.parametrize("already_boost", [False, True])
+async def test_boost_confirms_documented_temperature_and_flags(
+    hass, entry, wire, mode, native, displayed, already_boost
+):
+    hass.config.units = METRIC_SYSTEM
+    status = wire.root.find("statusUpdateMsg")
+    status.find("BaseMode").text = mode
+    status.find("Opt_super").text = "on" if already_boost else "off"
+    entity_id = await setup(hass, entry, wire)
+    await hass.services.async_call(
+        "climate",
+        "set_preset_mode",
+        {"entity_id": entity_id, "preset_mode": "boost"},
+        blocking=True,
+    )
+    assert wire.message_ids == ["SyncStatusReq", "SetMessage", "SyncStatusReq"]
+    payload = wire.requests[1].find("SetMessage")
+    assert payload.find("SetTemp").text == str(native)
+    assert payload.find("BaseMode").text == mode
+    assert payload.find("WindSpeed").text == "Low"
+    assert hass.states.get(entity_id).attributes["temperature"] == displayed
+    assert hass.states.get(entity_id).attributes["preset_mode"] == "boost"
+    wire.requests.clear()
+    await hass.services.async_call(
+        "climate",
+        "set_preset_mode",
+        {"entity_id": entity_id, "preset_mode": "boost"},
+        blocking=True,
+    )
+    assert wire.message_ids == ["SyncStatusReq"]
+
+
+@pytest.mark.parametrize("intent", ["boost", "temperature"])
+async def test_fan_only_fresh_status_blocks_cached_cool_command(
+    hass, entry, wire, intent
+):
+    status = wire.root.find("statusUpdateMsg")
+    status.find("BaseMode").text = "cool"
+    entity_id = await setup(hass, entry, wire)
+    status.find("BaseMode").text = "fan"
+    service, data = (
+        ("set_preset_mode", {"preset_mode": "boost"})
+        if intent == "boost"
+        else ("set_temperature", {"temperature": 73})
+    )
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            "climate", service, {"entity_id": entity_id, **data}, blocking=True
+        )
+    assert wire.message_ids == ["SyncStatusReq"]
+    assert entry.runtime_data.last_update_success
+
+
+async def test_fan_only_to_cool_temperature_is_one_explicit_command(hass, entry, wire):
+    wire.root.find("statusUpdateMsg/BaseMode").text = "fan"
+    entity_id = await setup(hass, entry, wire)
+    assert hass.states.get(entity_id).attributes["temperature"] is None
+    await hass.services.async_call(
+        "climate",
+        "set_temperature",
+        {"entity_id": entity_id, "hvac_mode": "cool", "temperature": 73},
+        blocking=True,
+    )
+    assert wire.message_ids == ["SyncStatusReq", "SetMessage", "SyncStatusReq"]
+    assert hass.states.get(entity_id).attributes["temperature"] == 73
+    assert hass.states.get(entity_id).state == "cool"
 
 
 async def test_concurrent_presets_and_polling_do_not_mix_flags(hass, entry, wire):
+    wire.root.find("statusUpdateMsg/BaseMode").text = "cool"
     entity_id = await setup(hass, entry, wire)
     await asyncio.wait_for(
         asyncio.gather(
@@ -475,6 +560,7 @@ async def test_concurrent_presets_and_polling_do_not_mix_flags(hass, entry, wire
 async def test_lost_counterpart_status_blocks_preset_before_write(
     hass, entry, wire, preset, missing
 ):
+    wire.root.find("statusUpdateMsg/BaseMode").text = "cool"
     entity_id = await setup(hass, entry, wire)
     status = wire.root.find("statusUpdateMsg")
     status.remove(status.find(missing))

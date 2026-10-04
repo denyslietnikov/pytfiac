@@ -10,11 +10,12 @@ import pytest
 
 @pytest.mark.parametrize("preset", ["none", "sleep", "boost"])
 @pytest.mark.parametrize("initial", ["none", "sleep", "boost"])
-def test_presets_preserve_core_and_encode_distinct_flags(
+def test_presets_encode_distinct_flags_and_only_boost_changes_target(
     protocol, state, preset, initial
 ):
     current = replace(
         state,
+        operation=protocol.models.Operation.COOL,
         power=protocol.models.Power.OFF,
         sleep="firmwareSleepProfile:0:0" if initial == "sleep" else "off",
         turbo=initial == "boost",
@@ -31,7 +32,7 @@ def test_presets_preserve_core_and_encode_distinct_flags(
     assert fields == {
         "TurnOn": "off",
         "BaseMode": str(current.operation),
-        "SetTemp": str(current.target_temperature),
+        "SetTemp": str(60.8 if preset == "boost" else current.target_temperature),
         "WindSpeed": str(current.fan),
         "Opt_sleepMode": protocol.models.SLEEP_MODE_ON if preset == "sleep" else "off",
         "Opt_super": "on" if preset == "boost" else "off",
@@ -62,6 +63,7 @@ def test_presets_preserve_core_and_encode_distinct_flags(
     ],
 )
 def test_both_preset_flags_must_confirm(protocol, state, preset, field, reported):
+    state = replace(state, operation=protocol.models.Operation.COOL)
     changes = protocol.models.TfiacChanges(preset=protocol.models.Preset(preset))
     desired = protocol.models.apply_changes(state, changes)
     assert not protocol.api._changes_confirmed(
@@ -71,7 +73,12 @@ def test_both_preset_flags_must_confirm(protocol, state, preset, field, reported
 
 
 def test_conflicting_flags_have_no_priority_and_can_be_cleared(protocol, state):
-    current = replace(state, sleep="sleepMode1:0:0", turbo=True)
+    current = replace(
+        state,
+        operation=protocol.models.Operation.COOL,
+        sleep="sleepMode1:0:0",
+        turbo=True,
+    )
     assert current.preset is None
     with pytest.raises(ValueError, match="cannot be enabled together"):
         protocol.api.build_preset_message(current, "123")
@@ -142,17 +149,48 @@ def test_sleep_validation_uses_fresh_status_before_write(protocol, status_respon
     asyncio.run(scenario())
 
 
-@pytest.mark.parametrize("preset", ["none", "boost"])
-def test_fan_only_still_allows_clearing_sleep_and_other_presets(
-    protocol, state, preset
-):
+def test_fan_only_still_allows_clearing_sleep(protocol, state):
     current = replace(
         state, operation=protocol.models.Operation.FAN, sleep="sleepMode1:0"
     )
     desired = protocol.models.apply_changes(
-        current, protocol.models.TfiacChanges(preset=protocol.models.Preset(preset))
+        current, protocol.models.TfiacChanges(preset=protocol.models.Preset.NONE)
     )
     assert desired.sleep == "off"
+
+
+@pytest.mark.parametrize("power", ["on", "off"])
+@pytest.mark.parametrize("operation,target", [("cool", 60.8), ("heat", 87.8)])
+def test_boost_sets_documented_target_without_forcing_power_or_fan(
+    protocol, state, power, operation, target
+):
+    current = replace(
+        state,
+        operation=protocol.models.Operation(operation),
+        power=protocol.models.Power(power),
+    )
+    desired = protocol.models.apply_changes(
+        current, protocol.models.TfiacChanges(preset=protocol.models.Preset.BOOST)
+    )
+    assert desired.target_temperature == target
+    assert desired.operation == current.operation
+    assert desired.power == current.power
+    assert desired.fan == current.fan
+    assert desired.preset == protocol.models.Preset.BOOST
+    assert not protocol.api._changes_confirmed(
+        replace(desired, target_temperature=current.target_temperature),
+        desired,
+        protocol.models.TfiacChanges(preset=protocol.models.Preset.BOOST),
+    )
+
+
+@pytest.mark.parametrize("operation", ["selfFeel", "dehumi", "fan"])
+def test_boost_refuses_undocumented_operations_before_write(protocol, state, operation):
+    current = replace(state, operation=protocol.models.Operation(operation))
+    with pytest.raises(ValueError, match="only in Cool or Heat"):
+        protocol.models.apply_changes(
+            current, protocol.models.TfiacChanges(preset=protocol.models.Preset.BOOST)
+        )
 
 
 def test_no_preset_capability_is_unknown_and_cannot_be_written(protocol, state):

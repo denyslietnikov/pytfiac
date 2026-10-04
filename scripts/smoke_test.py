@@ -123,7 +123,9 @@ class SmokeHarness:
             raise ValueError("Conflicting initial presets; cannot safely restore")
         if initial.preset is not None:
             # Refuse a baseline whose preset cannot be restored in its operation.
-            m.apply_changes(initial, m.TfiacChanges(preset=initial.preset))
+            restored = m.apply_changes(initial, m.TfiacChanges(preset=initial.preset))
+            if restored.target_temperature != initial.target_temperature:
+                raise ValueError("Initial Boost setpoint cannot be safely restored")
         if initial.eco is True:
             raise ValueError("Active Eco has no restoration writer; refusing writes")
         delta = self.options.temperature_step

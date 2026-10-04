@@ -32,7 +32,9 @@ from .models import (
     Power,
     Preset,
     TfiacChanges,
+    boost_allowed,
     sleep_allowed,
+    target_temperature_allowed,
 )
 
 HVAC_MAP = {
@@ -102,7 +104,9 @@ class TfiacClimate(TfiacEntity, ClimateEntity):
         self._attr_supported_features = features
 
     @property
-    def target_temperature(self) -> float:
+    def target_temperature(self) -> float | None:
+        if not target_temperature_allowed(self.coordinator.data.operation):
+            return None
         return self.coordinator.data.target_temperature
 
     @property
@@ -139,6 +143,7 @@ class TfiacClimate(TfiacEntity, ClimateEntity):
             preset
             for preset in self._attr_preset_modes
             if preset != PRESET_SLEEP or sleep_allowed(self.coordinator.data.operation)
+            if preset != PRESET_BOOST or boost_allowed(self.coordinator.data.operation)
         ]
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
@@ -148,6 +153,12 @@ class TfiacClimate(TfiacEntity, ClimateEntity):
             operation = HVAC_MAP[mode] if mode and mode != HVACMode.OFF else None
         except KeyError as err:
             raise ServiceValidationError("Unsupported HVAC mode") from err
+        if kwargs.get(ATTR_TEMPERATURE) is not None and not target_temperature_allowed(
+            operation or self.coordinator.data.operation
+        ):
+            raise ServiceValidationError(
+                "Target temperature is not available in Fan Only mode"
+            )
         await self.coordinator.async_apply_changes(
             TfiacChanges(
                 target_temperature=kwargs.get(ATTR_TEMPERATURE),
@@ -194,6 +205,14 @@ class TfiacClimate(TfiacEntity, ClimateEntity):
         )
 
     async def async_set_preset_mode(self, preset_mode: str) -> None:
+        if preset_mode == PRESET_BOOST and not boost_allowed(
+            self.coordinator.data.operation
+        ):
+            raise ServiceValidationError("Boost is available only in Cool or Heat mode")
+        if preset_mode == PRESET_SLEEP and not sleep_allowed(
+            self.coordinator.data.operation
+        ):
+            raise ServiceValidationError("Sleep is not available in Fan Only mode")
         if preset_mode not in self.preset_modes:
             raise ServiceValidationError("Unsupported preset mode")
         await self.coordinator.async_apply_changes(

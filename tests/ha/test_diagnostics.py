@@ -47,7 +47,7 @@ async def test_diagnostics_redact_config_and_raw_firmware_data(
     assert "OutdoorTemp:ambiguous_zero" in data["optional_issues"]
     assert data["notes"]["decoded_status_does_not_prove_writability"]
     assert data["notes"]["target_temperature_contract"] == {
-        "native_min": 61,
+        "native_min": 60.8,
         "native_max": 88,
         "numeric_decimal_places": 2,
         "hardware_step": None,

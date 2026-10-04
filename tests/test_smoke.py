@@ -378,6 +378,9 @@ def test_active_initial_preset_is_restored_semantically(rig, preset):
     rig.client.state = replace(
         rig.client.state,
         operation=rig.m.Operation.COOL,
+        target_temperature=60.8
+        if preset == "boost"
+        else rig.client.state.target_temperature,
         sleep="firmwareProfile:0" if preset == "sleep" else "off",
         turbo=preset == "boost",
     )
@@ -385,6 +388,16 @@ def test_active_initial_preset_is_restored_semantically(rig, preset):
     assert rig.report["result"] == "passed"
     assert rig.report["restored"]
     assert rig.client.state.preset == preset
+
+
+def test_inconsistent_boost_baseline_refuses_writes(rig):
+    rig.client.state = replace(
+        rig.client.state, operation=rig.m.Operation.COOL, turbo=True
+    )
+    with pytest.raises(ValueError, match="Boost setpoint cannot be safely restored"):
+        asyncio.run(rig.harness.run())
+    assert not rig.client.calls
+    assert rig.report["result"] == "failed"
 
 
 def test_sleep_in_fan_only_refuses_test_before_writes(rig):

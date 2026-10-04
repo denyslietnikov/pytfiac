@@ -33,6 +33,8 @@ directory, restart HA and add TFIAC. No separate `pytfiac` package is needed.
 
 Use the climate entity for normal control. Presets: `sleep`, `boost` (Turbo),
 or `none` to disable both. Sleep and Turbo are mutually exclusive.
+Sleep is unavailable in Fan Only. Boost uses 16 °C in Cool or 31 °C in Heat;
+select one of these modes first. Fan Only has no target temperature.
 **Reconfigure** changes the AC's IP address.
 
 Display and Beep switches appear automatically when the AC reports usable status.
@@ -40,8 +42,8 @@ Updating enables previously integration-disabled switches, preserving their IDs
 and any manual disablement. Loading the integration sends no control commands.
 The outdoor sensor remains disabled by default; verify it before use.
 
-Temperatures follow your HA unit settings. The current range is `61–88 °F`;
-for tenth-degree Celsius requests, use `16.2–31.1 °C`. Hardware limits and steps
+Temperatures follow your HA unit settings. The current range is `60.8–88 °F`;
+for tenth-degree Celsius requests, use `16.0–31.1 °C`. Hardware limits and steps
 still need model-specific validation. Setting temperature alone does not turn
 the AC on; test optional controls while it is running. Confirmation may take
 up to 25 seconds.

@@ -79,6 +79,10 @@ async def test_boost_preset_icon(hass, entry, client, ha_state):
     ],
 )
 async def test_services(hass, entry, client, service, data, expected):
+    if data.get("preset_mode") == "boost":
+        client.async_update.return_value = replace(
+            client.async_update.return_value, operation=Operation.COOL
+        )
     entity_id = await setup(hass, entry)
     await hass.services.async_call(
         "climate", service, {"entity_id": entity_id, **data}, blocking=True
@@ -163,7 +167,7 @@ async def test_turn_on_preserves_last_operation(hass, entry, client, ha_state):
 async def test_preset_capabilities_and_actual_status(
     hass, entry, client, ha_state, sleep, turbo
 ):
-    state = replace(ha_state, sleep=sleep, turbo=turbo)
+    state = replace(ha_state, operation=Operation.COOL, sleep=sleep, turbo=turbo)
     client.async_update.return_value = state
     entity_id = await setup(hass, entry)
     attrs = hass.states.get(entity_id).attributes
@@ -190,13 +194,46 @@ async def test_eco_is_not_a_preset(hass, entry, client):
     client.async_apply_changes.assert_not_awaited()
 
 
+@pytest.mark.parametrize("operation", [Operation.AUTO, Operation.DRY, Operation.FAN])
+async def test_boost_unavailable_operations_report_actual_flags_and_allow_none(
+    hass, entry, client, ha_state, operation
+):
+    client.async_update.return_value = replace(
+        ha_state, operation=operation, turbo=True
+    )
+    entity_id = await setup(hass, entry)
+    attrs = hass.states.get(entity_id).attributes
+    assert "boost" not in attrs["preset_modes"]
+    assert attrs["preset_mode"] == "boost"
+    # HA validates against preset_modes before calling the entity method.
+    with pytest.raises(ServiceValidationError, match="Preset mode boost is not valid"):
+        await hass.services.async_call(
+            "climate",
+            "set_preset_mode",
+            {"entity_id": entity_id, "preset_mode": "boost"},
+            blocking=True,
+        )
+    with pytest.raises(ServiceValidationError, match="only in Cool or Heat"):
+        await TfiacClimate(entry.runtime_data).async_set_preset_mode("boost")
+    client.async_apply_changes.assert_not_awaited()
+    await hass.services.async_call(
+        "climate",
+        "set_preset_mode",
+        {"entity_id": entity_id, "preset_mode": "none"},
+        blocking=True,
+    )
+    client.async_apply_changes.assert_awaited_once_with(
+        TfiacChanges(preset=Preset.NONE)
+    )
+
+
 @pytest.mark.parametrize("power", [Power.ON, Power.OFF])
 async def test_sleep_choices_follow_operation(hass, entry, client, ha_state, power):
     client.async_update.return_value = replace(
         ha_state, operation=Operation.FAN, power=power
     )
     entity_id = await setup(hass, entry)
-    assert hass.states.get(entity_id).attributes["preset_modes"] == ["none", "boost"]
+    assert hass.states.get(entity_id).attributes["preset_modes"] == ["none"]
     with pytest.raises(ServiceValidationError):
         await hass.services.async_call(
             "climate",
@@ -211,11 +248,43 @@ async def test_sleep_choices_follow_operation(hass, entry, client, ha_state, pow
         )
         await hass.async_block_till_done()
         assert "sleep" in hass.states.get(entity_id).attributes["preset_modes"]
+        assert ("boost" in hass.states.get(entity_id).attributes["preset_modes"]) == (
+            operation in (Operation.COOL, Operation.HEAT)
+        )
     entry.runtime_data.async_set_updated_data(
         replace(ha_state, operation=Operation.FAN, power=power)
     )
     await hass.async_block_till_done()
     assert "sleep" not in hass.states.get(entity_id).attributes["preset_modes"]
+
+
+@pytest.mark.parametrize("power", [Power.ON, Power.OFF])
+async def test_fan_only_has_no_target_and_rejects_temperature_service(
+    hass, entry, client, ha_state, power
+):
+    client.async_update.return_value = replace(
+        ha_state, operation=Operation.FAN, power=power
+    )
+    entity_id = await setup(hass, entry)
+    assert hass.states.get(entity_id).attributes["temperature"] is None
+    for data in ({"temperature": 73}, {"temperature": 73, "hvac_mode": "fan_only"}):
+        with pytest.raises(ServiceValidationError, match="Fan Only"):
+            await hass.services.async_call(
+                "climate",
+                "set_temperature",
+                {"entity_id": entity_id, **data},
+                blocking=True,
+            )
+    client.async_apply_changes.assert_not_awaited()
+    await hass.services.async_call(
+        "climate",
+        "set_temperature",
+        {"entity_id": entity_id, "temperature": 73, "hvac_mode": "cool"},
+        blocking=True,
+    )
+    client.async_apply_changes.assert_awaited_once_with(
+        TfiacChanges(operation=Operation.COOL, target_temperature=73)
+    )
 
 
 async def test_fan_only_does_not_hide_reported_sleep(hass, entry, client, ha_state):

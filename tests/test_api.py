@@ -1,6 +1,7 @@
 """Transactions and UDP lifecycle with no real network or air conditioner."""
 
 import asyncio
+from dataclasses import replace
 from unittest.mock import AsyncMock, Mock
 from xml.etree import ElementTree as ET
 
@@ -79,6 +80,63 @@ def test_failed_write_is_not_retried(protocol, status_response):
         assert client._send.await_count == 2
         client._send = AsyncMock(return_value=status_response)
         assert (await client.async_update()).sleep == "off"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("has_snapshot", [False, True])
+def test_confirmation_deadline_during_read_uses_last_snapshot(
+    protocol, state, monkeypatch, has_snapshot
+):
+    """Expire exactly during a read; do not depend on a 30 ms scheduling race."""
+
+    async def scenario():
+        budget = asyncio.timeout(None)
+        monkeypatch.setattr(protocol.api.asyncio, "timeout", lambda seconds: budget)
+        monkeypatch.setattr(protocol.api, "COMMAND_CONFIRMATION_INTERVAL", 0)
+        client = protocol.api.TfiacClient("192.0.2.1")
+        reads = 0
+
+        async def read():
+            nonlocal reads
+            reads += 1
+            if has_snapshot and reads == 1:
+                return state
+            budget.reschedule(asyncio.get_running_loop().time())
+            await asyncio.Future()
+
+        client._read_status = read
+        expected = (
+            protocol.api.TfiacCommandNotConfirmedError
+            if has_snapshot
+            else protocol.api.TfiacTimeoutError
+        )
+        with pytest.raises(expected) as err:
+            await client._confirm_changes(
+                replace(state, target_temperature=78),
+                protocol.models.TfiacChanges(target_temperature=78),
+            )
+        if has_snapshot:
+            assert err.value.last_state == state
+        assert reads == (2 if has_snapshot else 1)
+
+    asyncio.run(scenario())
+
+
+def test_real_read_timeout_is_not_reclassified_as_unconfirmed(
+    protocol, state, monkeypatch
+):
+    async def scenario():
+        monkeypatch.setattr(protocol.api, "COMMAND_CONFIRMATION_INTERVAL", 0)
+        client = protocol.api.TfiacClient("192.0.2.1")
+        client._read_status = AsyncMock(
+            side_effect=[state, protocol.api.TfiacTimeoutError("UDP timeout")]
+        )
+        with pytest.raises(protocol.api.TfiacTimeoutError, match="UDP timeout"):
+            await client._confirm_changes(
+                replace(state, target_temperature=78),
+                protocol.models.TfiacChanges(target_temperature=78),
+            )
 
     asyncio.run(scenario())
 

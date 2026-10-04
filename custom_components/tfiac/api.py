@@ -15,6 +15,7 @@ from .models import (
     Fan,
     Operation,
     Power,
+    Preset,
     TfiacChanges,
     TfiacState,
     apply_changes,
@@ -322,6 +323,12 @@ def _changes_confirmed(
     if changes.operation is not None and state.power != desired.power:
         return False
     if changes.preset is not None:
+        # Super explicitly requests its documented setpoint as well as the flag.
+        if (
+            changes.preset == Preset.BOOST
+            and state.target_temperature != desired.target_temperature
+        ):
+            return False
         if desired.turbo is not None and state.turbo != desired.turbo:
             return False
         if desired.sleep is not None:
@@ -389,19 +396,19 @@ class TfiacClient:
     ) -> TfiacState:
         """Wait with bounded read-only requests; caller keeps the transaction lock."""
         last_state = None
-        reading = False
         try:
             async with asyncio.timeout(COMMAND_CONFIRMATION_TIMEOUT):
                 while True:
-                    reading = True
                     state = await self._read_status()
-                    reading = False
                     if _changes_confirmed(state, desired, changes):
                         return state
                     last_state = state
                     await asyncio.sleep(COMMAND_CONFIRMATION_INTERVAL)
         except TimeoutError as err:
-            if reading or last_state is None:
+            # Expiring the overall budget during a read does not invalidate an
+            # already received snapshot. Real per-request UDP timeouts propagate
+            # as TfiacTimeoutError; no snapshot at all is also a response timeout.
+            if last_state is None:
                 raise TfiacTimeoutError(
                     "Device did not respond during command confirmation"
                 ) from err
