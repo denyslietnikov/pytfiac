@@ -219,6 +219,24 @@ def build_set_message(state: TfiacState, seq: str) -> bytes:
     return _envelope("SetMessage", _full_state_fields(state), seq)
 
 
+def build_preset_message(state: TfiacState, seq: str) -> bytes:
+    """One preset write: keep distinct wire encodings and disable before enable."""
+    if state.turbo is True and state.sleep not in (None, "off"):
+        raise ValueError("Sleep and Turbo cannot be enabled together")
+    fields = [
+        (tag, value)
+        for tag, value in _full_state_fields(state)
+        if tag != "Opt_sleepMode"
+    ]
+    if state.turbo is False:
+        fields.append(("Opt_super", "off"))
+    if state.sleep is not None:
+        fields.append(("Opt_sleepMode", state.sleep))
+    if state.turbo is True:
+        fields.append(("Opt_super", "on"))
+    return _envelope("SetMessage", fields, seq)
+
+
 def build_swing_message(state: TfiacState, seq: str) -> bytes:
     """Preserve the existing two-field swing payload."""
     fields = [
@@ -305,12 +323,15 @@ def _changes_confirmed(
     # sufficient if the device is still off.
     if changes.operation is not None and state.power != desired.power:
         return False
-    if changes.sleep is not None:
-        if state.sleep is None:
+    if changes.preset is not None:
+        if desired.turbo is not None and state.turbo != desired.turbo:
             return False
-        # Firmware can shorten the transmitted Sleep profile and change fan.
-        # Confirm the enabled/disabled meaning, never exact profile text.
-        return (state.sleep != "off") == changes.sleep
+        if desired.sleep is not None:
+            if state.sleep is None:
+                return False
+            # Firmware can shorten the Sleep profile and change fan.
+            # Both flags must confirm, including the other preset being off.
+            return (state.sleep != "off") == (desired.sleep != "off")
     return True
 
 
@@ -324,6 +345,7 @@ class TfiacClient:
         self.command_profile = CommandProfile(command_profile)
         self._lock = asyncio.Lock()
         self._last_sequence = 0
+        self._known_preset_fields: set[str] = set()
 
     def _sequence(self) -> str:
         value = max(time_ns() // 1_000_000, self._last_sequence + 1)
@@ -354,7 +376,13 @@ class TfiacClient:
                 transport.close()
 
     async def _read_status(self) -> TfiacState:
-        return parse_status(await self._send(build_status_message(self._sequence())))
+        state = parse_status(await self._send(build_status_message(self._sequence())))
+        # Remember observed capabilities only to fail closed on later field loss.
+        # This does not infer writer spellings or retain a cached control value.
+        self._known_preset_fields.update(
+            field for field in ("sleep", "turbo") if getattr(state, field) is not None
+        )
+        return state
 
     async def async_update(self) -> TfiacState:
         """Read current state with no client-side throttling."""
@@ -391,13 +419,16 @@ class TfiacClient:
         )
         full_state = any(
             getattr(changes, field) is not None
-            for field in ("power", "operation", "target_temperature", "fan", "sleep")
+            for field in ("power", "operation", "target_temperature", "fan")
         )
         optional = [
             field
             for field in OPTIONAL_CONTROL_FIELDS
             if getattr(changes, field) is not None
         ]
+        preset = changes.preset is not None
+        if preset and (swing or full_state or optional):
+            raise ValueError("Presets require a separate command")
         if optional and (
             not self.command_profile.command_fields
             or len(optional) != 1
@@ -411,11 +442,19 @@ class TfiacClient:
             raise ValueError("Swing and full-state changes require separate commands")
         async with self._lock:
             current = await self._read_status()
+            if preset and any(
+                getattr(current, field) is None for field in self._known_preset_fields
+            ):
+                raise ValueError("Device no longer reports a usable preset status")
             desired = apply_changes(current, changes)
             if _changes_confirmed(current, desired, changes):
                 return current
             builder: Callable[[TfiacState, str], bytes] = (
-                build_swing_message if swing else build_set_message
+                build_preset_message
+                if preset
+                else build_swing_message
+                if swing
+                else build_set_message
             )
             message = (
                 build_optional_message(

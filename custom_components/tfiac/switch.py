@@ -26,7 +26,7 @@ SWITCHES = tuple(
         state_field=field,
         entity_registry_enabled_default=False,
     )
-    for field in ("eco", "turbo", "display", "beep")
+    for field in ("display", "beep")
 )
 
 

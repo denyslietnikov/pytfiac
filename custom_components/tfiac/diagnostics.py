@@ -57,6 +57,7 @@ async def async_get_config_entry_diagnostics(
             "swing_horizontal": state.swing_horizontal,
             "swing_vertical": state.swing_vertical,
             "fan": state.fan,
+            "preset": state.preset,
             "sleep_active": None if state.sleep is None else state.sleep != "off",
             "eco": state.eco,
             "turbo": state.turbo,
@@ -68,6 +69,13 @@ async def async_get_config_entry_diagnostics(
         "reported_fields": [name for name, _ in state.raw_fields],
         "optional_issues": list(state.optional_issues),
         "notes": {
+            "eco_is_read_only_diagnostic": True,
+            "preset_command_contract": {
+                "sleep": "Opt_sleepMode profile/off",
+                "boost": "Opt_super on/off",
+                "mutually_exclusive": True,
+                "combined_write_hardware_validated": False,
+            },
             "decoded_status_does_not_prove_writability": True,
             "temperature_unit_assumption": "legacy Fahrenheit",
             "target_temperature_contract": {

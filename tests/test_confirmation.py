@@ -17,13 +17,8 @@ import pytest
         ("fan", "High", "Middle"),
         ("swing_horizontal", True, False),
         ("swing_vertical", False, True),
-        ("eco", True, False),
-        ("turbo", True, None),
         ("display", False, None),
         ("beep", False, True),
-        ("sleep", True, "off"),
-        ("sleep", False, "sleepMode1:0:0"),
-        ("sleep", True, None),
     ],
 )
 def test_only_requested_controls_must_match(
@@ -124,7 +119,7 @@ def test_sleep_confirms_normalized_profile_and_actual_fan(protocol, status_respo
             ]
         )
         result = await client.async_apply_changes(
-            protocol.models.TfiacChanges(sleep=True)
+            protocol.models.TfiacChanges(preset=protocol.models.Preset.SLEEP)
         )
         assert result.sleep == "sleepMode1:0:0:0:0:0:0:0:0:0:0"
         assert result.fan == protocol.models.Fan.AUTO
@@ -134,7 +129,9 @@ def test_sleep_confirms_normalized_profile_and_actual_fan(protocol, status_respo
         client._send.return_value = ET.tostring(root)
         # Already active with a shortened firmware profile: do not resend Sleep.
         assert (
-            await client.async_apply_changes(protocol.models.TfiacChanges(sleep=True))
+            await client.async_apply_changes(
+                protocol.models.TfiacChanges(preset=protocol.models.Preset.SLEEP)
+            )
             == result
         )
         client._send.assert_awaited_once()
@@ -145,8 +142,6 @@ def test_sleep_confirms_normalized_profile_and_actual_fan(protocol, status_respo
 @pytest.mark.parametrize(
     "field,tag",
     [
-        ("eco", "Opt_ECO"),
-        ("turbo", "Opt_super"),
         ("display", "Opt_display"),
         ("beep", "BeepEnable"),
     ],

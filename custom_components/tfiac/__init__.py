@@ -2,6 +2,7 @@
 
 from homeassistant.const import CONF_HOST, Platform
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from .api import TfiacClient
 from .const import CONF_COMMAND_PROFILE
@@ -22,6 +23,16 @@ async def async_setup_entry(hass: HomeAssistant, entry: TfiacConfigEntry) -> boo
     coordinator = TfiacCoordinator(hass, entry, client)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
+    # Remove only our superseded beta switches. Keep climate/Display/Beep IDs.
+    registry = er.async_get(hass)
+    removed_ids = {f"{entry.entry_id}_eco", f"{entry.entry_id}_turbo"}
+    for entity in er.async_entries_for_config_entry(registry, entry.entry_id):
+        if (
+            entity.domain == "switch"
+            and entity.platform == "tfiac"
+            and entity.unique_id in removed_ids
+        ):
+            registry.async_remove(entity.entity_id)
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     return True
 

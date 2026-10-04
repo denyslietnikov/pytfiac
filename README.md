@@ -8,9 +8,9 @@ Requires **Home Assistant 2026.9.4+** and local network access to the AC (UDP 77
 ## Features
 
 - Cool, Heat, Dry, Fan Only and Auto modes
-- Fan speed, independent vertical/horizontal swing and Sleep preset
+- Fan speed, independent vertical/horizontal swing and Sleep/Boost (Turbo) presets
 - Current and target temperature
-- Experimental Eco, Turbo, Display, Beep and outdoor temperature
+- Experimental Display, Beep and outdoor temperature
 - Apple Home and Siri through [HomeKit Bridge](https://www.home-assistant.io/integrations/homekit/)
 
 ## Installation
@@ -31,8 +31,9 @@ directory, restart HA and add TFIAC. No separate `pytfiac` package is needed.
 
 ## Usage
 
-Use the climate entity for normal control. Select the `sleep` preset to enable
-Sleep, or `none` to disable it. **Reconfigure** changes the AC's IP address.
+Use the climate entity for normal control. Presets: `sleep`, `boost` (Turbo),
+or `none` to disable both. Sleep and Turbo are mutually exclusive.
+**Reconfigure** changes the AC's IP address.
 
 For optional switches, select **Configure → Optional command profile →
 Experimental commands (model-specific)**, then enable individual entities on the
@@ -49,6 +50,9 @@ up to 25 seconds.
 
 Back up HA before updating. Existing entity/device IDs are retained.
 Fan automations using `medium` must change to `middle`.
+The former Turbo switch is replaced by `climate.set_preset_mode` with `boost`
+or `none`; Eco control is removed. Both old switch entities are removed on setup.
+Update affected automations and dashboard cards.
 
 ### Swing migration in 0.7
 

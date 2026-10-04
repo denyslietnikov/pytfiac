@@ -307,6 +307,7 @@ async def setup(hass, entry, wire):
             "on",
         ),
         ("set_preset_mode", {"preset_mode": "sleep"}, "preset_mode", "sleep"),
+        ("set_preset_mode", {"preset_mode": "boost"}, "preset_mode", "boost"),
         ("set_preset_mode", {"preset_mode": "none"}, "preset_mode", "none"),
         ("turn_on", {}, "state", "auto"),
         ("turn_off", {}, "state", "off"),
@@ -336,6 +337,157 @@ async def test_controls_read_back_real_snapshot(
     )
     if service == "set_temperature":
         assert state.attributes["temperature"] == 78
+
+
+@pytest.mark.parametrize("initial", ["none", "sleep", "boost"])
+@pytest.mark.parametrize("preset", ["none", "sleep", "boost"])
+@pytest.mark.parametrize("power", ["off", "on"])
+async def test_preset_transitions_are_one_write_with_distinct_encodings(
+    hass, entry, wire, initial, preset, power
+):
+    status = wire.root.find("statusUpdateMsg")
+    status.find("TurnOn").text = power
+    status.find("Opt_sleepMode").text = (
+        "sleepMode1:0:0" if initial == "sleep" else "off"
+    )
+    status.find("Opt_super").text = "on" if initial == "boost" else "off"
+    entity_id = await setup(hass, entry, wire)
+    assert hass.states.get(entity_id).attributes["preset_modes"] == [
+        "none",
+        "sleep",
+        "boost",
+    ]
+    assert entry.runtime_data.client.command_profile.value == "disabled"
+    # A remote changes core settings after the cached HA snapshot.
+    status.find("WindSpeed").text = "High"
+    status.find("SetTemp").text = "79"
+    await hass.services.async_call(
+        "climate",
+        "set_preset_mode",
+        {"entity_id": entity_id, "preset_mode": preset},
+        blocking=True,
+    )
+    actual = hass.states.get(entity_id)
+    assert actual.attributes["preset_mode"] == preset
+    assert actual.state == ("off" if power == "off" else "auto")
+    assert actual.attributes["fan_mode"] == "high"
+    assert actual.attributes["temperature"] == 79
+    if initial == preset:
+        assert wire.message_ids == ["SyncStatusReq"]
+        return
+    assert wire.message_ids == ["SyncStatusReq", "SetMessage", "SyncStatusReq"]
+    fields = {node.tag: node.text for node in wire.requests[1].find("SetMessage")}
+    assert fields["Opt_super"] == ("on" if preset == "boost" else "off")
+    assert (
+        fields["Opt_sleepMode"].startswith("sleepMode1:")
+        if preset == "sleep"
+        else fields["Opt_sleepMode"] == "off"
+    )
+    assert fields["TurnOn"] == power
+    assert fields["WindSpeed"] == "High"
+    assert fields["SetTemp"] == "79.0"
+    assert set(fields) == {
+        "TurnOn",
+        "BaseMode",
+        "SetTemp",
+        "WindSpeed",
+        "Opt_sleepMode",
+        "Opt_super",
+    }
+
+
+@pytest.mark.parametrize(
+    "preset,ignored",
+    [("sleep", "Opt_super"), ("boost", "Opt_sleepMode"), ("none", "Opt_super")],
+)
+async def test_preset_partial_application_is_not_success(
+    hass, entry, wire, monkeypatch, preset, ignored
+):
+    monkeypatch.setattr(
+        "custom_components.tfiac.api.COMMAND_CONFIRMATION_TIMEOUT", 0.03
+    )
+    monkeypatch.setattr(
+        "custom_components.tfiac.api.COMMAND_CONFIRMATION_INTERVAL", 0.001
+    )
+    status = wire.root.find("statusUpdateMsg")
+    status.find("Opt_super").text = "off" if preset == "boost" else "on"
+    status.find("Opt_sleepMode").text = "sleepMode1:0:0" if preset == "boost" else "off"
+    entity_id = await setup(hass, entry, wire)
+    old_send = wire.send
+
+    async def partially_apply(message):
+        request = ET.fromstring(message)
+        if request.get("msgid") == "SetMessage":
+            node = request.find(f"SetMessage/{ignored}")
+            request.find("SetMessage").remove(node)
+            return await old_send(ET.tostring(request))
+        return await old_send(message)
+
+    entry.runtime_data.client._send = partially_apply
+    with pytest.raises(HomeAssistantError, match="did not confirm"):
+        await hass.services.async_call(
+            "climate",
+            "set_preset_mode",
+            {"entity_id": entity_id, "preset_mode": preset},
+            blocking=True,
+        )
+    assert entry.runtime_data.last_update_success
+    assert sum(request.get("msgid") == "SetMessage" for request in wire.requests) == 1
+    assert hass.states.get(entity_id).attributes["preset_mode"] != preset
+
+
+async def test_concurrent_presets_and_polling_do_not_mix_flags(hass, entry, wire):
+    entity_id = await setup(hass, entry, wire)
+    await asyncio.wait_for(
+        asyncio.gather(
+            hass.services.async_call(
+                "climate",
+                "set_preset_mode",
+                {"entity_id": entity_id, "preset_mode": "sleep"},
+                blocking=True,
+            ),
+            hass.services.async_call(
+                "climate",
+                "set_preset_mode",
+                {"entity_id": entity_id, "preset_mode": "boost"},
+                blocking=True,
+            ),
+            entry.runtime_data.async_refresh(),
+        ),
+        timeout=1,
+    )
+    writes = [
+        request.find("SetMessage")
+        for request in wire.requests
+        if request.get("msgid") == "SetMessage"
+    ]
+    assert len(writes) == 2
+    for payload in writes:
+        assert not (
+            payload.find("Opt_super").text == "on"
+            and payload.find("Opt_sleepMode").text != "off"
+        )
+    assert entry.runtime_data.data.preset in ("sleep", "boost")
+
+
+@pytest.mark.parametrize(
+    "preset,missing", [("sleep", "Opt_super"), ("boost", "Opt_sleepMode")]
+)
+async def test_lost_counterpart_status_blocks_preset_before_write(
+    hass, entry, wire, preset, missing
+):
+    entity_id = await setup(hass, entry, wire)
+    status = wire.root.find("statusUpdateMsg")
+    status.remove(status.find(missing))
+    with pytest.raises(ServiceValidationError, match="usable preset status"):
+        await hass.services.async_call(
+            "climate",
+            "set_preset_mode",
+            {"entity_id": entity_id, "preset_mode": preset},
+            blocking=True,
+        )
+    assert wire.message_ids == ["SyncStatusReq"]
+    assert entry.runtime_data.last_update_success
 
 
 @pytest.mark.parametrize("enabled", [False, True])

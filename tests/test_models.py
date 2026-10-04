@@ -276,16 +276,19 @@ def test_conflicting_power_and_operation(protocol, state):
 
 def test_sleep_uses_existing_profile(protocol, state):
     desired = protocol.models.apply_changes(
-        state, protocol.models.TfiacChanges(sleep=True)
+        state, protocol.models.TfiacChanges(preset=protocol.models.Preset.SLEEP)
     )
     assert desired.sleep == protocol.models.SLEEP_MODE_ON
     assert desired.fan == state.fan
 
 
-@pytest.mark.parametrize("change", ["sleep", "swing_horizontal", "swing_vertical"])
+@pytest.mark.parametrize("change", ["preset", "swing_horizontal", "swing_vertical"])
 def test_unsupported_changes(protocol, state, change):
     unsupported = replace(state, sleep=None, swing_horizontal=None, swing_vertical=None)
     with pytest.raises(ValueError):
         protocol.models.apply_changes(
-            unsupported, protocol.models.TfiacChanges(**{change: True})
+            unsupported,
+            protocol.models.TfiacChanges(
+                **{change: "sleep" if change == "preset" else True}
+            ),
         )

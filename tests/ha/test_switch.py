@@ -17,8 +17,6 @@ from custom_components.tfiac.models import CommandProfile
 
 pytestmark = pytest.mark.asyncio
 FIELDS = (
-    ("eco", "Opt_ECO", "Opt_ECO"),
-    ("turbo", "Opt_super", "Opt_super"),
     ("display", "Opt_display", "Opt_display"),
     ("beep", "BeepEnable", "BeepEnable"),
 )
@@ -134,13 +132,11 @@ async def test_opted_in_entities_disabled_by_default_and_share_device(
 ):
     await setup(hass, entry, device)
     registered = switches(hass, entry)
-    assert len(registered) == 4
+    assert len(registered) == 2
     assert {item.unique_id for item in registered} == {
         f"{entry.entry_id}_{field}" for field, _, _ in FIELDS
     }
     assert {item.original_name for item in registered} == {
-        "Eco",
-        "Turbo",
         "Display",
         "Beep",
     }
@@ -191,7 +187,7 @@ async def test_switch_services_exact_command_and_no_mode_rules(
     for other, _, _ in FIELDS:
         if other != field:
             assert getattr(entry.runtime_data.data, other) is True
-    assert len(entry.runtime_data._listeners) == 5
+    assert len(entry.runtime_data._listeners) == 3
 
 
 async def test_missing_invalid_conflicting_flags_do_not_create_controls(
@@ -202,9 +198,7 @@ async def test_missing_invalid_conflicting_flags_do_not_create_controls(
     device.set("Opt_display", "unknown")
     device.set("Opt_beep", "on")  # Conflicts with BeepEnable=off.
     await setup(hass, entry, device)
-    assert [item.unique_id for item in switches(hass, entry)] == [
-        f"{entry.entry_id}_eco"
-    ]
+    assert switches(hass, entry) == []
     assert entry.runtime_data.last_update_success
 
 
@@ -236,9 +230,9 @@ async def test_no_optimism_or_retries_and_recovery(
         device.apply_writes = False
         with pytest.raises(HomeAssistantError, match="did not confirm"):
             await hass.services.async_call(
-                "switch", "turn_on", {"entity_id": entities["eco"]}, blocking=True
+                "switch", "turn_on", {"entity_id": entities["display"]}, blocking=True
             )
-        assert hass.states.get(entities["eco"]).state == "off"
+        assert hass.states.get(entities["display"]).state == "off"
         assert entry.runtime_data.last_update_success
         assert device.message_ids == ["SyncStatusReq", "SetMessage", "SyncStatusReq"]
         return
@@ -248,17 +242,17 @@ async def test_no_optimism_or_retries_and_recovery(
         device.fail_after_write = True
     with pytest.raises(HomeAssistantError):
         await hass.services.async_call(
-            "switch", "turn_on", {"entity_id": entities["eco"]}, blocking=True
+            "switch", "turn_on", {"entity_id": entities["display"]}, blocking=True
         )
     assert sum(request.get("msgid") == "SetMessage" for request in device.requests) == 1
-    assert entry.runtime_data.data.eco is False
+    assert entry.runtime_data.data.display is False
     assert all(
         hass.states.get(entity_id).state == "unavailable"
         for entity_id in entities.values()
     )
     device.reject_write = device.fail_after_write = device.fail_read = False
     await entry.runtime_data.async_refresh()
-    assert hass.states.get(entities["eco"]).state == (
+    assert hass.states.get(entities["display"]).state == (
         "off" if failure == "reject" else "on"
     )
 
@@ -271,10 +265,10 @@ async def test_concurrent_optional_climate_and_polling_share_lock(hass, entry, d
     await asyncio.wait_for(
         asyncio.gather(
             hass.services.async_call(
-                "switch", "turn_on", {"entity_id": entities["eco"]}, blocking=True
+                "switch", "turn_on", {"entity_id": entities["display"]}, blocking=True
             ),
             hass.services.async_call(
-                "switch", "turn_on", {"entity_id": entities["turbo"]}, blocking=True
+                "switch", "turn_on", {"entity_id": entities["beep"]}, blocking=True
             ),
             hass.services.async_call(
                 "climate",
@@ -286,8 +280,8 @@ async def test_concurrent_optional_climate_and_polling_share_lock(hass, entry, d
         ),
         timeout=1,
     )
-    assert hass.states.get(entities["eco"]).state == "on"
-    assert hass.states.get(entities["turbo"]).state == "on"
+    assert hass.states.get(entities["display"]).state == "on"
+    assert hass.states.get(entities["beep"]).state == "on"
     assert entry.runtime_data.data.target_temperature == 78
     # One independent poll, three uninterrupted read/write/read transactions.
     ids = device.message_ids
@@ -334,7 +328,7 @@ async def test_options_auto_reload_no_writes_preserves_options_and_ids(
     assert (
         entry.runtime_data.client.command_profile == CommandProfile.LEGACY_EXPERIMENTAL
     )
-    assert len(switches(hass, entry)) == 4
+    assert len(switches(hass, entry)) == 2
     assert device.hosts == ["192.0.2.2", "192.0.2.2"]
     assert device.message_ids == ["SyncStatusReq"]
     report = await async_get_config_entry_diagnostics(hass, entry)
@@ -342,8 +336,6 @@ async def test_options_auto_reload_no_writes_preserves_options_and_ids(
         "profile": "legacy_experimental",
         "hardware_validated": False,
         "command_fields": {
-            "eco": "Opt_ECO",
-            "turbo": "Opt_super",
             "display": "Opt_display",
             "beep": "BeepEnable",
         },
@@ -373,7 +365,7 @@ async def test_disabling_profile_removes_enabled_controls_from_runtime(
     entities = await setup(hass, entry, device, enable=True)
     await options(hass, entry, "disabled")
     assert len(entry.runtime_data._listeners) == 1
-    assert hass.states.get(entities["eco"]).state == "unavailable"
+    assert hass.states.get(entities["display"]).state == "unavailable"
     assert all(request.get("msgid") == "SyncStatusReq" for request in device.requests)
 
 
@@ -388,4 +380,34 @@ async def test_invalid_profile_does_not_change_options(hass, entry, device):
     assert result["type"] == FlowResultType.FORM
     assert result["errors"] == {"command_profile": "invalid_profile"}
     assert entry.options == {}
+    assert device.requests == []
+
+
+async def test_upgrade_removes_only_retired_eco_and_turbo_switches(hass, entry, device):
+    registry = er.async_get(hass)
+    old_ids = []
+    for field in ("eco", "turbo"):
+        old_ids.append(
+            registry.async_get_or_create(
+                "switch",
+                "tfiac",
+                f"{entry.entry_id}_{field}",
+                config_entry=entry,
+                suggested_object_id=f"ac_{field}",
+                disabled_by=None,
+            ).entity_id
+        )
+    keep = registry.async_get_or_create(
+        "switch",
+        "tfiac",
+        f"{entry.entry_id}_future",
+        config_entry=entry,
+        suggested_object_id="ac_future",
+    )
+    entities = await setup(hass, entry, device, enable=True)
+    assert all(registry.async_get(entity_id) is None for entity_id in old_ids)
+    assert registry.async_get(keep.entity_id) is not None
+    assert all(
+        registry.async_get(entity_id) is not None for entity_id in entities.values()
+    )
     assert device.requests == []

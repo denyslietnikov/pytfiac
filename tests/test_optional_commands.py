@@ -8,8 +8,6 @@ from xml.etree import ElementTree as ET
 import pytest
 
 FIELDS = (
-    ("eco", "Opt_ECO"),
-    ("turbo", "Opt_super"),
     ("display", "Opt_display"),
     ("beep", "BeepEnable"),
 )
@@ -90,7 +88,7 @@ def test_invalid_or_missing_status_cannot_be_written(
 
 @pytest.mark.parametrize(
     "extra",
-    [{"turbo": True}, {"sleep": True}, {"power": "on"}, {"swing_vertical": True}],
+    [{"beep": True}, {"preset": "sleep"}, {"power": "on"}, {"swing_vertical": True}],
 )
 def test_optional_mixed_intent_rejected_before_io(protocol, extra):
     async def scenario():
@@ -101,7 +99,7 @@ def test_optional_mixed_intent_rejected_before_io(protocol, extra):
         client._send = AsyncMock()
         with pytest.raises(ValueError):
             await client.async_apply_changes(
-                protocol.models.TfiacChanges(eco=True, **extra)
+                protocol.models.TfiacChanges(display=True, **extra)
             )
         client._send.assert_not_awaited()
 
@@ -138,7 +136,7 @@ def test_optional_noop_is_read_only(protocol, status_response):
             command_profile=protocol.models.CommandProfile.LEGACY_EXPERIMENTAL,
         )
         client._send = AsyncMock(return_value=response_with_flags(status_response))
-        await client.async_apply_changes(protocol.models.TfiacChanges(eco=False))
+        await client.async_apply_changes(protocol.models.TfiacChanges(display=False))
         client._send.assert_awaited_once()
 
     asyncio.run(scenario())
@@ -152,9 +150,9 @@ def test_invalid_profile_fails_closed(protocol):
 @pytest.mark.parametrize(
     "profile,changes",
     [
-        ("disabled", {"eco": True}),
+        ("disabled", {"display": True}),
         ("legacy_experimental", {}),
-        ("legacy_experimental", {"eco": True, "turbo": True}),
+        ("legacy_experimental", {"display": True, "beep": True}),
     ],
 )
 def test_builder_requires_explicit_single_flag(protocol, state, profile, changes):

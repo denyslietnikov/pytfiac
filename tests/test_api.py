@@ -73,7 +73,9 @@ def test_failed_write_is_not_retried(protocol, status_response):
             side_effect=[status_response, protocol.api.TfiacTimeoutError()]
         )
         with pytest.raises(protocol.api.TfiacTimeoutError):
-            await client.async_apply_changes(protocol.models.TfiacChanges(sleep=True))
+            await client.async_apply_changes(
+                protocol.models.TfiacChanges(preset=protocol.models.Preset.SLEEP)
+            )
         assert client._send.await_count == 2
         client._send = AsyncMock(return_value=status_response)
         assert (await client.async_update()).sleep == "off"
@@ -111,7 +113,9 @@ def test_cancelled_transaction_releases_lock(protocol, status_response):
 
         client._send = send
         transaction = asyncio.create_task(
-            client.async_apply_changes(protocol.models.TfiacChanges(sleep=True))
+            client.async_apply_changes(
+                protocol.models.TfiacChanges(preset=protocol.models.Preset.SLEEP)
+            )
         )
         await asyncio.wait_for(reading_after_write.wait(), timeout=1)
         transaction.cancel()

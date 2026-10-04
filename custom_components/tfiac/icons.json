@@ -1,0 +1,15 @@
+{
+  "entity": {
+    "climate": {
+      "climate": {
+        "state_attributes": {
+          "preset_mode": {
+            "state": {
+              "boost": "mdi:weather-windy"
+            }
+          }
+        }
+      }
+    }
+  }
+}

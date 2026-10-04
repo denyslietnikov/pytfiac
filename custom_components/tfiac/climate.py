@@ -8,6 +8,7 @@ from homeassistant.components.climate import (
     FAN_HIGH,
     FAN_LOW,
     FAN_MIDDLE,
+    PRESET_BOOST,
     PRESET_NONE,
     PRESET_SLEEP,
     SWING_OFF,
@@ -23,7 +24,7 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .coordinator import TfiacConfigEntry, TfiacCoordinator
 from .entity import TfiacEntity
-from .models import MAX_TEMP, MIN_TEMP, Fan, Operation, Power, TfiacChanges
+from .models import MAX_TEMP, MIN_TEMP, Fan, Operation, Power, Preset, TfiacChanges
 
 HVAC_MAP = {
     HVACMode.HEAT: Operation.HEAT,
@@ -56,6 +57,7 @@ async def async_setup_entry(
 class TfiacClimate(TfiacEntity, ClimateEntity):
     """Expose the existing climate controls through Home Assistant APIs."""
 
+    _attr_translation_key = "climate"
     _attr_temperature_unit = UnitOfTemperature.FAHRENHEIT
     _attr_min_temp = MIN_TEMP
     _attr_max_temp = MAX_TEMP
@@ -66,7 +68,6 @@ class TfiacClimate(TfiacEntity, ClimateEntity):
     _attr_hvac_modes = [HVACMode.OFF, *HVAC_MAP]
     _attr_swing_modes = list(SWING_MAP)
     _attr_swing_horizontal_modes = list(SWING_MAP)
-    _attr_preset_modes = [PRESET_NONE, PRESET_SLEEP]
 
     def __init__(self, coordinator: TfiacCoordinator) -> None:
         super().__init__(coordinator)
@@ -77,7 +78,13 @@ class TfiacClimate(TfiacEntity, ClimateEntity):
             | ClimateEntityFeature.TURN_ON
         )
         state = coordinator.data
+        self._attr_preset_modes = []
         if state.sleep is not None:
+            self._attr_preset_modes.append(PRESET_SLEEP)
+        if state.turbo is not None:
+            self._attr_preset_modes.append(PRESET_BOOST)
+        if self._attr_preset_modes:
+            self._attr_preset_modes.insert(0, PRESET_NONE)
             features |= ClimateEntityFeature.PRESET_MODE
         if state.swing_vertical is not None:
             features |= ClimateEntityFeature.SWING_MODE
@@ -114,10 +121,7 @@ class TfiacClimate(TfiacEntity, ClimateEntity):
 
     @property
     def preset_mode(self) -> str | None:
-        sleep = self.coordinator.data.sleep
-        if sleep is None:
-            return None
-        return PRESET_NONE if sleep == "off" else PRESET_SLEEP
+        return self.coordinator.data.preset
 
     async def async_set_temperature(self, **kwargs: Any) -> None:
         """Apply temperature and optional HVAC mode in one full-state command."""
@@ -175,7 +179,7 @@ class TfiacClimate(TfiacEntity, ClimateEntity):
         if preset_mode not in self.preset_modes:
             raise ServiceValidationError("Unsupported preset mode")
         await self.coordinator.async_apply_changes(
-            TfiacChanges(sleep=preset_mode == PRESET_SLEEP)
+            TfiacChanges(preset=Preset(preset_mode))
         )
 
     async def async_turn_on(self) -> None:

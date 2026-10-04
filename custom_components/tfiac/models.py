@@ -9,7 +9,15 @@ MAX_TEMP = 88
 # Existing status decoder precision, not a hardware setpoint increment.
 TEMPERATURE_DECIMAL_PLACES = 2
 SLEEP_MODE_ON = "sleepMode1:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0:0"
-OPTIONAL_CONTROL_FIELDS = ("eco", "turbo", "display", "beep")
+OPTIONAL_CONTROL_FIELDS = ("display", "beep")
+
+
+class Preset(StrEnum):
+    """Mutually exclusive Sleep/Turbo, confirmed by the maintainer's device."""
+
+    NONE = "none"
+    SLEEP = "sleep"
+    BOOST = "boost"
 
 
 class CommandProfile(StrEnum):
@@ -23,8 +31,6 @@ class CommandProfile(StrEnum):
         """Livingroom-tested spellings; other firmware still requires validation."""
         if self == self.LEGACY_EXPERIMENTAL:
             return (
-                ("eco", "Opt_ECO"),
-                ("turbo", "Opt_super"),
                 ("display", "Opt_display"),
                 ("beep", "BeepEnable"),
             )
@@ -111,6 +117,20 @@ class TfiacState:
             degree_half=self.degree_half is not None,
         )
 
+    @property
+    def preset(self) -> Preset | None:
+        """Report actual flags; a conflicting status has no invented priority."""
+        sleeping = self.sleep is not None and self.sleep != "off"
+        if sleeping and self.turbo is True:
+            return None
+        if sleeping:
+            return Preset.SLEEP
+        if self.turbo is True:
+            return Preset.BOOST
+        if self.sleep is not None or self.turbo is not None:
+            return Preset.NONE
+        return None
+
 
 @dataclass(frozen=True, slots=True)
 class TfiacChanges:
@@ -122,9 +142,7 @@ class TfiacChanges:
     fan: Fan | None = None
     swing_horizontal: bool | None = None
     swing_vertical: bool | None = None
-    sleep: bool | None = None
-    eco: bool | None = None
-    turbo: bool | None = None
+    preset: Preset | None = None
     display: bool | None = None
     beep: bool | None = None
 
@@ -163,10 +181,18 @@ def apply_changes(state: TfiacState, changes: TfiacChanges) -> TfiacState:
             if getattr(state, field) is None:
                 raise ValueError(f"Device does not report {field}")
             updates[field] = value
-    if changes.sleep is not None:
-        if state.sleep is None:
+    if changes.preset is not None:
+        preset = Preset(changes.preset)
+        if preset == Preset.SLEEP and state.sleep is None:
             raise ValueError("Device does not report sleep mode")
-        updates["sleep"] = SLEEP_MODE_ON if changes.sleep else "off"
+        if preset == Preset.BOOST and state.turbo is None:
+            raise ValueError("Device does not report a usable turbo status")
+        if state.sleep is None and state.turbo is None:
+            raise ValueError("Device does not report presets")
+        if state.sleep is not None:
+            updates["sleep"] = SLEEP_MODE_ON if preset == Preset.SLEEP else "off"
+        if state.turbo is not None:
+            updates["turbo"] = preset == Preset.BOOST
     for field in OPTIONAL_CONTROL_FIELDS:
         if (value := getattr(changes, field)) is not None:
             if not isinstance(value, bool):

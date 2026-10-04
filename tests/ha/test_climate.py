@@ -7,11 +7,12 @@ import pytest
 from homeassistant.components.climate import ClimateEntityFeature, HVACMode
 from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import entity_registry as er
+from homeassistant.helpers.icon import async_get_icons
 from homeassistant.util.unit_system import METRIC_SYSTEM
 
 from custom_components.tfiac.api import TfiacTimeoutError
 from custom_components.tfiac.climate import TfiacClimate
-from custom_components.tfiac.models import Fan, Operation, Power, TfiacChanges
+from custom_components.tfiac.models import Fan, Operation, Power, Preset, TfiacChanges
 
 pytestmark = pytest.mark.asyncio
 
@@ -22,6 +23,21 @@ async def setup(hass, entry):
     return er.async_entries_for_config_entry(er.async_get(hass), entry.entry_id)[
         0
     ].entity_id
+
+
+async def test_boost_preset_icon(hass, entry, client, ha_state):
+    """Expose only the Boost override through HA's native icon resources."""
+    entity_id = await setup(hass, entry)
+    registry_entry = er.async_get(hass).async_get(entity_id)
+    assert registry_entry.translation_key == "climate"
+    assert registry_entry.unique_id == entry.entry_id
+    assert hass.states.get(entity_id).attributes["friendly_name"] == ha_state.name
+    assert "icon" not in hass.states.get(entity_id).attributes
+
+    icons = await async_get_icons(hass, "entity", {"tfiac"})
+    assert icons["tfiac"]["climate"][registry_entry.translation_key] == {
+        "state_attributes": {"preset_mode": {"state": {"boost": "mdi:weather-windy"}}}
+    }
 
 
 @pytest.mark.parametrize(
@@ -49,7 +65,17 @@ async def setup(hass, entry):
             {"swing_horizontal_mode": "on"},
             TfiacChanges(swing_horizontal=True),
         ),
-        ("set_preset_mode", {"preset_mode": "sleep"}, TfiacChanges(sleep=True)),
+        (
+            "set_preset_mode",
+            {"preset_mode": "sleep"},
+            TfiacChanges(preset=Preset.SLEEP),
+        ),
+        (
+            "set_preset_mode",
+            {"preset_mode": "boost"},
+            TfiacChanges(preset=Preset.BOOST),
+        ),
+        ("set_preset_mode", {"preset_mode": "none"}, TfiacChanges(preset=Preset.NONE)),
         ("turn_on", {}, TfiacChanges(power=Power.ON)),
         ("turn_off", {}, TfiacChanges(power=Power.OFF)),
     ],
@@ -110,6 +136,7 @@ async def test_optional_features(hass, entry, client, ha_state):
     client.async_update.return_value = replace(
         ha_state,
         sleep=None,
+        turbo=None,
         swing_horizontal=None,
         swing_vertical=None,
         current_temperature=None,
@@ -131,6 +158,38 @@ async def test_turn_on_preserves_last_operation(hass, entry, client, ha_state):
     assert climate.hvac_mode == HVACMode.OFF
     await climate.async_turn_on()
     client.async_apply_changes.assert_awaited_once_with(TfiacChanges(power=Power.ON))
+
+
+@pytest.mark.parametrize("sleep", [None, "off", "sleepMode1:0:0"])
+@pytest.mark.parametrize("turbo", [None, False, True])
+async def test_preset_capabilities_and_actual_status(
+    hass, entry, client, ha_state, sleep, turbo
+):
+    state = replace(ha_state, sleep=sleep, turbo=turbo)
+    client.async_update.return_value = state
+    entity_id = await setup(hass, entry)
+    attrs = hass.states.get(entity_id).attributes
+    modes = (["sleep"] if sleep is not None else []) + (
+        ["boost"] if turbo is not None else []
+    )
+    assert bool(attrs["supported_features"] & ClimateEntityFeature.PRESET_MODE) == bool(
+        modes
+    )
+    if modes:
+        assert attrs["preset_modes"] == ["none", *modes]
+        assert attrs["preset_mode"] == state.preset
+
+
+async def test_eco_is_not_a_preset(hass, entry, client):
+    entity_id = await setup(hass, entry)
+    with pytest.raises(ServiceValidationError):
+        await hass.services.async_call(
+            "climate",
+            "set_preset_mode",
+            {"entity_id": entity_id, "preset_mode": "eco"},
+            blocking=True,
+        )
+    client.async_apply_changes.assert_not_awaited()
 
 
 async def test_metric_service_temperature_is_converted_by_ha(hass, entry, client):
