@@ -10,4 +10,4 @@ updates:
       interval: monthly
     ignore:
       # Upgrade the pinned HA test baseline deliberately after validation.
-      - dependency-name: pytest-homeassistant-custom-component
+      - dependency-name: pytest-homeassistant

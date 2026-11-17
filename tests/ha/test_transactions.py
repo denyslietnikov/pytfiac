@@ -83,7 +83,7 @@ async def test_native_range_and_unknown_step_are_not_inferred(
         node.text = degree_half
     entity_id = await setup(hass, entry, wire)
     entity = hass.data["climate"].get_entity(entity_id)
-    assert entity.temperature_unit == "°F"
+    assert entity.native_temperature_unit == "°F"
     assert entity.min_temp == 60.8
     assert entity.max_temp == 88
     assert entity.target_temperature_step is None

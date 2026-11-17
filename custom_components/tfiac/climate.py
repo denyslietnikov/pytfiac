@@ -69,7 +69,7 @@ class TfiacClimate(TfiacEntity, ClimateEntity):
     """Expose the existing climate controls through Home Assistant APIs."""
 
     _attr_translation_key = "climate"
-    _attr_temperature_unit = UnitOfTemperature.FAHRENHEIT
+    _attr_native_temperature_unit = UnitOfTemperature.FAHRENHEIT
     _attr_min_temp = MIN_TEMP
     _attr_max_temp = MAX_TEMP
     # Unknown hardware increment: Degree_Half is only a decoded status flag.
@@ -104,13 +104,13 @@ class TfiacClimate(TfiacEntity, ClimateEntity):
         self._attr_supported_features = features
 
     @property
-    def target_temperature(self) -> float | None:
+    def native_target_temperature(self) -> float | None:
         if not target_temperature_allowed(self.coordinator.data.operation):
             return None
         return self.coordinator.data.target_temperature
 
     @property
-    def current_temperature(self) -> float | None:
+    def native_current_temperature(self) -> float | None:
         return self.coordinator.data.current_temperature
 
     @property

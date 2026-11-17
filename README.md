@@ -2,7 +2,7 @@
 
 Local control of TFIAC air conditioners in Home Assistant. No cloud account required.
 
-Requires **Home Assistant 2026.9.4+** and local network access to the AC (UDP 7777).
+Requires **Home Assistant 2026.11+** and local network access to the AC (UDP 7777).
 `develop` contains the unpublished `0.7.0b1` candidate with limited hardware testing.
 
 ## Features
