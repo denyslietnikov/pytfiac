@@ -348,6 +348,16 @@ async def test_upgrade_preserves_non_integration_disablement(
     hass, entry, device, disabled_by
 ):
     registry = er.async_get(hass)
+    device_id = None
+    if disabled_by == er.RegistryEntryDisabler.DEVICE:
+        # HA 2026.11 derives DEVICE disablement from the device registry;
+        # an orphan DEVICE flag on an entity is deliberately cleared by core.
+        registered_device = dr.async_get(hass).async_get_or_create(
+            config_entry_id=entry.entry_id,
+            identifiers={("tfiac", entry.entry_id)},
+            disabled_by=dr.DeviceEntryDisabler.USER,
+        )
+        device_id = registered_device.id
     old = registry.async_get_or_create(
         "switch",
         "tfiac",
@@ -355,6 +365,7 @@ async def test_upgrade_preserves_non_integration_disablement(
         config_entry=entry,
         suggested_object_id="old_display",
         disabled_by=disabled_by,
+        device_id=device_id,
     )
     await setup(hass, entry, device)
     assert registry.async_get(old.entity_id).disabled_by == disabled_by

@@ -25,6 +25,7 @@ def test_manifest_is_development_candidate() -> None:
     assert manifest["documentation"].startswith("https://github.com/")
     assert manifest["issue_tracker"].endswith("/issues")
     assert manifest["requirements"] == []
+    assert manifest["categories"] == ["climate.heat_pumps_air_conditioning"]
 
 
 def test_hacs_metadata_does_not_duplicate_manifest() -> None:
@@ -33,7 +34,7 @@ def test_hacs_metadata_does_not_duplicate_manifest() -> None:
 
     assert hacs == {
         "name": "TFIAC",
-        "homeassistant": "2026.9.4",
+        "homeassistant": "2026.11.0",
         "hide_default_branch": True,
     }
 

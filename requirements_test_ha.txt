@@ -1,3 +1,4 @@
-# Stable Home Assistant 2026.9.4; requires Python 3.14.
+# Official HA test fixtures and matching core; requires Python 3.14.2+.
 -r requirements_test.txt
-pytest-homeassistant-custom-component==0.13.367
+pytest-homeassistant==2026.11.2
+pytest-cov==7.1.0
